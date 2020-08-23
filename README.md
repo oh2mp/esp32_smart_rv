@@ -21,7 +21,7 @@ Don't worry that the sensor names in these example photos are in Finnish. They a
 portal mode that is in English.
 
 ![Photo1](s/smart_rv_photo1_small.jpg)
-![Photo2](s/smart_rv_photo1.jpg)
+![Photo2](s/smart_rv_photo2_small.jpg)
 
 ------
 
