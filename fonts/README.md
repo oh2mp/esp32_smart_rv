@@ -10,6 +10,10 @@ The big font is based on Arial Bold and contains several symbols. The sfd file f
 
 There is a shell script included which creates the full `tftfonts.h` file.
 
+------
+
+Character map of the Bigfont:
+
 ![Bigfont](bigfont.png)
 
 
