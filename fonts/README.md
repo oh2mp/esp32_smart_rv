@@ -6,7 +6,8 @@ provided, you can ignore the contents of this directory.
 See the Tools provided with the TFT_eSPI library and read the documentation how to create the fonts with 
 Processing tool. You also will probably need FontForge.
 
-The big font is based on Arial Bold and contains several symbols. The sfd file for FontForge is also included.
+The big font is based on Arial Bold and contains several symbols. Some of them are used in this phase and
+there are also several symbols for future use. The sfd file for FontForge is also included.
 
 There is a shell script included which creates the full `tftfonts.h` file.
 
