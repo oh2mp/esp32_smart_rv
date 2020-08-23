@@ -77,8 +77,8 @@ the AP info on the screen, connect to WiFi **ESP32 Smart RV**, accept that there
 and take your browser to !http://192.168.4.1/
 
 The web GUI should be self explanatory. Flame threshold is for MAX6675 beacon and it's the temperature 
-that we believe that the gas flame is burning. 100°C is a good value to start. It looks that when the 
-flame distinguishes, the temperature drops under 100 quite fastly depending on the distance of the 
+that we believe that the gas flame is burning. 50°C is a good value to start. It looks that when the 
+flame distinguishes, the temperature drops under 50°C quite fastly depending on the distance of the 
 thermocouple. The water tank volume is for that the horizontal scale can be drawn onto the screen under 
 the water tank info.
 
@@ -125,7 +125,7 @@ Only two rows: First row contains the flame threshold and the second row the tan
 **Example misc.txt file:**
 
 ```
-100
+50
 110
 ```
 
