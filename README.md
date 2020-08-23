@@ -1,6 +1,6 @@
 # OH2MP ESP32 Smart RV
 
-### An ESP32 based smart screen for a motorhome or caravan
+### An ESP32 based smart display for a motorhome or caravan
 
 This project is for to make a "central screen" for a motorhome or caravan. The software listens to
 several BLE beacons and shows their data on a TFT display. The architecture is very modular. Several
