@@ -134,7 +134,7 @@ Only two rows: First row contains the flame threshold and the second row the tan
 ## Fonts
 
 There are several fonts used with the display. They are as const arrays in `tftfonts.h`. If you want to 
-customize them, then look at the [fonts subdirectory}(fonts/) of this repository. Otherwise you can just 
+customize them, then look at the [fonts subdirectory](fonts/) of this repository. Otherwise you can just 
 ignore or even delete the contents of that directory. They are needed only if you want to change the 
 fonts.
 
