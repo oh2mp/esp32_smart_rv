@@ -109,7 +109,7 @@ used and their formats are:
 ### known_tags.txt
 
 One known tag per row. First the MAC address in lowercase hex and colons between bytes, then TAB, 
-then name of the tag and newline.
+then name of the tag and newline (ascii 0x0A).
 
 **Example known_tags.txt file:**
 
@@ -133,8 +133,9 @@ Only two rows: First row contains the flame threshold and the second row the tan
 
 ## Fonts
 
-There are several fonts used with the display. They are as const arrays in `tftfonts.h`. If you want 
-to customize them, then look at the `fonts` subdirectory of this repository. Otherwise you can just ignore or
-even delete the contents of that directory. They are needed only if you want to change the fonts.
+There are several fonts used with the display. They are as const arrays in `tftfonts.h`. If you want to 
+customize them, then look at the [fonts subdirectory}(fonts/) of this repository. Otherwise you can just 
+ignore or even delete the contents of that directory. They are needed only if you want to change the 
+fonts.
 
 ------
