@@ -12,7 +12,8 @@ just ignore the support. The software shows data only from known beacons that ar
 web portal (see later).
 
 The temperatures, pressure, humidity etc. use [Ruuvi tags](https://ruuvi.com/). Ruuvi tag is an excellent
-product and with them there's no need of inventing the wheel again.
+product and with them there's no need of inventing the wheel again. Only data format V5 (RAWv2) is supported.
+See Ruuvi documentation for setting the mode.
 
 Other beacons that are supported are:
 
@@ -63,6 +64,29 @@ Short press increases the lightness of the screen and long press switches the un
 ------
 
 ## Portal mode
+
+If the button is pressed over 5 seconds, the unit switches to the portal mode.
+
+In the start of portal mode the ESP32 is listening 10 seconds for new beacons.
+WiFi AP is not listening yet at that period and a listening symbol is visible on the screen. After you see
+the AP info on the screen, connect to WiFi **ESP32 Smart RV**, accept that there's no internet connection
+and take your browser to http://192.168.4.1/
+
+The web GUI should be self explanatory. Flame threshold is for MAX6675 beacon and it's the temperature
+that we believe that the gas flame is burning. 100°C is a good value. After the flame distinguishes, the
+temperature drops under 100 quite fastly. The water tank volume is for that the horizontal scale can be
+drawn onto the screen.
+
+It's a good idea to find out the Bluetooth MAC addresses of the beacons beforehand. For Ruuvi tags the
+easiest way is to use Ruuvi software. For other beacons eg. 
+[BLE Scanner by Bluepixel Technologies](https://play.google.com/store/apps/details?id=com.macdom.ble.blescanner)
+is a suitable app for Android.
+
+There's almost no sanity checks for the data sent from the forms. This is not a public web service and if 
+you want to mess up your board or try to make a denial of service using eg. buffer overflows, feel free to 
+do so.
+
+### Sample screenshots
 
 ![Portal main](s/portal.jpg)
 ![Sensors config](s/sensors_config.jpg)
