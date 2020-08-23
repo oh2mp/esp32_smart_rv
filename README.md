@@ -72,10 +72,11 @@ WiFi AP is not listening yet at that period and a listening symbol is visible on
 the AP info on the screen, connect to WiFi **ESP32 Smart RV**, accept that there's no internet connection
 and take your browser to http://192.168.4.1/
 
-The web GUI should be self explanatory. Flame threshold is for MAX6675 beacon and it's the temperature
-that we believe that the gas flame is burning. 100°C is a good value. After the flame distinguishes, the
-temperature drops under 100 quite fastly. The water tank volume is for that the horizontal scale can be
-drawn onto the screen.
+The web GUI should be self explanatory. Flame threshold is for MAX6675 beacon and it's the temperature 
+that we believe that the gas flame is burning. 100°C is a good value to start. It looks that when the 
+flame distinguishes, the temperature drops under 100 quite fastly depending on the distance of the 
+thermocouple. The water tank volume is for that the horizontal scale can be drawn onto the screen under 
+the water tank info.
 
 It's a good idea to find out the Bluetooth MAC addresses of the beacons beforehand. For Ruuvi tags the
 easiest way is to use Ruuvi software. For other beacons eg. 
@@ -91,5 +92,30 @@ do so.
 ![Portal main](s/portal.jpg)
 ![Sensors config](s/sensors_config.jpg)
 ![Misc config](s/misc_config.jpg)
+
+------
+
+## Configuration option
+
+The portal saves all configurations onto the SPIFFS filesystem. They are just text files, so you can 
+precreate them and then your ESP32 Ruuvi Collector is preconfigured and you don't have to use the portal 
+at all. Just place your configuration files into the data directory along the html files and upload them 
+with ESP filesystem uploader. Only two files are used:
+
+### known_tags.txt
+
+One known tag per row. First the MAC address in lowercase hex and colons between bytes, then TAB, 
+then name of the tag and newline.
+
+**Example known_tags.txt file:**
+
+```
+f4:01:83:12:ce:95	foo
+e3:28:8c:99:47:ae	bar
+```
+
+### misc.txt
+
+Only two rows: First row contains the flame threshold and the second row the tank volume. Lines ended by newline.
 
 ------
