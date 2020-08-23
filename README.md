@@ -17,13 +17,18 @@ Other beacons that are supported are:
 - [ESP32 Energy meter](https://github.com/oh2mp/esp32_energymeter)
 - [ESP32 MAX6675 beacon for thermocouples for gas fridge](https://github.com/oh2mp/esp32_max6675_beacon)
 
-Don't worry that the sensor names in these example photos are in Finnish. They are fully configurable via
+Don't worry about that the sensor names in these example photos are in Finnish. They are fully configurable via
 portal mode that is in English.
 
 ![Photo1](s/smart_rv_photo1_small.jpg)
 ![Photo2](s/smart_rv_photo2_small.jpg)
 
+The file `smart_rv_for_laser_cutter.svg` included in this repository is for laser cutters if you want to 
+make a similar plexiglas frame and have a cutter available.
+
 ------
+
+## Code configuration, wiring and dependencies
 
 The screen graphics use [Bodmer's TFT_eSPI library](https://github.com/Bodmer/TFT_eSPI).
 
