@@ -2,6 +2,9 @@
 
 ### An ESP32 based smart screen for a motorhome or caravan
 
+## Note: This documentation is not ready yet!
+
+
 This project is for to make a "central screen" for a motorhome or caravan. The software listens to
 several BLE beacons and shows their data on a TFT display. The architecture is very modular. Several
 different BLE beacons are supported now and more are to come. If you don't have all of those beacons, you can 
