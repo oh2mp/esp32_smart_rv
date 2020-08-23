@@ -2,6 +2,22 @@
 
 ### An ESP32 based smart screen for a motorhome or caravan
 
+This project is for to make a "central screen" for a motorhome or caravan. The software listens to
+several BLE beacons and shows their data on a TFT display. The idea is that this gizmo is modular. Several
+different BLE beacons are supported now and more are to come. If you don't have all of those beacons, you can 
+just ignore the support. The software shows data only from known beacons that are configured from the
+web portal (see later).
+
+The temperatures, pressure, humidity etc. use [Ruuvi tags](https://ruuvi.com/). Ruuvi tag is an excellent
+product and with them there's no need of inventing the wheel again.
+
+Other beacons that are supported are:
+
+- [ESP32 Water sensor](https://github.com/oh2mp/esp32_watersensor)
+- [ESP32 Energy meter](https://github.com/oh2mp/esp32_energymeter)
+- [ESP32 MAX6675 beacon for thermocouples for gas fridge](https://github.com/oh2mp/esp32_max6675_beacon)
+
+------
 
 The screen graphics use [Bodmer's TFT_eSPI library](https://github.com/Bodmer/TFT_eSPI).
 
