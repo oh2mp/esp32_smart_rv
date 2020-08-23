@@ -3,7 +3,7 @@
 ### An ESP32 based smart screen for a motorhome or caravan
 
 This project is for to make a "central screen" for a motorhome or caravan. The software listens to
-several BLE beacons and shows their data on a TFT display. The idea is that this gizmo is modular. Several
+several BLE beacons and shows their data on a TFT display. The architecture is very modular. Several
 different BLE beacons are supported now and more are to come. If you don't have all of those beacons, you can 
 just ignore the support. The software shows data only from known beacons that are configured from the
 web portal (see later).
@@ -16,6 +16,12 @@ Other beacons that are supported are:
 - [ESP32 Water sensor](https://github.com/oh2mp/esp32_watersensor)
 - [ESP32 Energy meter](https://github.com/oh2mp/esp32_energymeter)
 - [ESP32 MAX6675 beacon for thermocouples for gas fridge](https://github.com/oh2mp/esp32_max6675_beacon)
+
+Don't worry that the sensor names in these example photos are in Finnish. They are fully configurable via
+portal mode that is in English.
+
+![Photo1](s/smart_rv_photo1.jpg)
+![Photo2](s/smart_rv_photo1.jpg)
 
 ------
 
@@ -33,3 +39,7 @@ to change file `libraries/TFT_eSPI/User_Setup.h` lines 188-193 as follows:
 #define TFT_RST   2  // Reset pin (could connect to RST pin)
 ```
 
+It's very recommended to use exactly these pins for the display even though they are configurable. 
+They have been tested and work well.
+
+------
