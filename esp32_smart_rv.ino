@@ -1,5 +1,5 @@
 /*
- * WiFi configurable ESP32 Intelligent Motorhome
+ * WiFi configurable ESP32 Smart RV
  * 
  * See https://github.com/oh2mp/esp32_smart_rv
  *

@@ -2,9 +2,6 @@
 
 ### An ESP32 based smart screen for a motorhome or caravan
 
-## Note: This documentation is not ready yet!
-
-
 This project is for to make a "central screen" for a motorhome or caravan. The software listens to
 several BLE beacons and shows their data on a TFT display. The architecture is very modular. Several
 different BLE beacons are supported now and more are to come. If you don't have all of those beacons, you can 
@@ -13,7 +10,7 @@ web portal (see later).
 
 The temperatures, pressure, humidity etc. use [Ruuvi tags](https://ruuvi.com/). Ruuvi tag is an excellent
 product and with them there's no need of inventing the wheel again. Only data format V5 (RAWv2) is supported.
-See Ruuvi documentation for setting the mode.
+See Ruuvi documentation for setting the right mode.
 
 Other beacons that are supported are:
 
@@ -77,7 +74,7 @@ If the button is pressed over 5 seconds, the unit switches to the portal mode.
 In the start of portal mode the ESP32 is listening 10 seconds for new beacons.
 WiFi AP is not listening yet at that period and a listening symbol is visible on the screen. After you see
 the AP info on the screen, connect to WiFi **ESP32 Smart RV**, accept that there's no internet connection
-and take your browser to http://192.168.4.1/
+and take your browser to !http://192.168.4.1/
 
 The web GUI should be self explanatory. Flame threshold is for MAX6675 beacon and it's the temperature 
 that we believe that the gas flame is burning. 100°C is a good value to start. It looks that when the 
@@ -107,7 +104,7 @@ do so.
 The portal saves all configurations onto the SPIFFS filesystem. They are just text files, so you can 
 precreate them and then you don't have to use the portal at all. Just place your configuration files into 
 the data directory along the html files and upload them with ESP filesystem uploader. Only two files are 
-used:
+used and their formats are:
 
 ### known_tags.txt
 
@@ -131,5 +128,13 @@ Only two rows: First row contains the flame threshold and the second row the tan
 100
 110
 ```
+
+------
+
+## Fonts
+
+There are several fonts used with the display. They are as const arrays in `tftfonts.h`. If you want 
+to customize them, then look at the `fonts` subdirectory of this repository. Otherwise you can just ignore or
+even delete the contents of that directory. They are needed only if you want to change the fonts.
 
 ------
