@@ -30,6 +30,10 @@ portal mode that is in English.
 The file `smart_rv_for_laser_cutter.svg` included in this repository is for laser cutters if you want to 
 make a similar plexiglas frame and have a cutter available.
 
+The display used here is ILI9341 driven 320x240 TFT. It can be bought eg. from 
+[Banggood](https://www.banggood.com/2_8-Inch-ILI9341-240x320-SPI-TFT-LCD-Display-Touch-Panel-SPI-Serial-Port-Module-p-1206782.html?p=6H24052869562201510Z)
+and the price is less than 10€.
+
 ------
 
 ## Code configuration, wiring and dependencies
@@ -60,6 +64,9 @@ Short press increases the lightness of the screen and long press switches the un
 #define BUTTON 12                // push button for lightness and long press starts portal
 #define BLLED 19                 // backlight led
 ```
+
+You must also use the [Arduino ESP32 filesystem uploader](https://github.com/me-no-dev/arduino-esp32fs-plugin/)
+to upload the files in the data directory. There are the html and css files needed for portal.
 
 ------
 
