@@ -31,7 +31,7 @@ The library needs to be configured for the right driver chip etc. and with this 
 to change file `libraries/TFT_eSPI/User_Setup.h` lines 188-193 as follows:
 
 ```c
-#define TFT_MISO 19
+// #define TFT_MISO 19
 #define TFT_MOSI 23
 #define TFT_SCLK 18
 #define TFT_CS   15  // Chip select control pin
@@ -40,6 +40,16 @@ to change file `libraries/TFT_eSPI/User_Setup.h` lines 188-193 as follows:
 ```
 
 It's very recommended to use exactly these pins for the display even though they are configurable. 
-They have been tested and work well.
+They have been tested and work well. The MISO pin is not connected because we are not reading anything
+from the display driver chip in this project.
+
+In the main program code there are defines for push button and backlight LED. 
+Connect a button between the pin and ground and connect the LED pin to the display's BL pin.
+Short press increases the lightness of the screen and long press switches the unit to the portal mode.
+
+```c
+#define BUTTON 12                // push button for lightness and long press starts portal
+#define BLLED 19                 // backlight led
+```
 
 ------
