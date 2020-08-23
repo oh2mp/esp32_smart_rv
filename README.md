@@ -20,7 +20,7 @@ Other beacons that are supported are:
 Don't worry that the sensor names in these example photos are in Finnish. They are fully configurable via
 portal mode that is in English.
 
-![Photo1](s/smart_rv_photo1.jpg)
+![Photo1](s/smart_rv_photo1_small.jpg)
 ![Photo2](s/smart_rv_photo1.jpg)
 
 ------
