@@ -58,3 +58,11 @@ Short press increases the lightness of the screen and long press switches the un
 ```
 
 ------
+
+## Portal mode
+
+![Portal main](s/portal.jpg)
+![Sensors config](s/sensors_config.jpg)
+![Misc config](s/misc_config.jpg)
+
+------
