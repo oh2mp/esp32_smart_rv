@@ -98,9 +98,9 @@ do so.
 ## Configuration option
 
 The portal saves all configurations onto the SPIFFS filesystem. They are just text files, so you can 
-precreate them and then your ESP32 Ruuvi Collector is preconfigured and you don't have to use the portal 
-at all. Just place your configuration files into the data directory along the html files and upload them 
-with ESP filesystem uploader. Only two files are used:
+precreate them and then you don't have to use the portal at all. Just place your configuration files into 
+the data directory along the html files and upload them with ESP filesystem uploader. Only two files are 
+used:
 
 ### known_tags.txt
 
@@ -117,5 +117,12 @@ e3:28:8c:99:47:ae	bar
 ### misc.txt
 
 Only two rows: First row contains the flame threshold and the second row the tank volume. Lines ended by newline.
+
+**Example misc.txt file:**
+
+```
+100
+110
+```
 
 ------
