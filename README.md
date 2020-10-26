@@ -15,6 +15,7 @@ See Ruuvi documentation for setting the right mode.
 **NEW! Now this supports also Xiaomi Mijia Bluetooth Thermometer 2 with 
 [ATC1441 custom firmware](https://github.com/atc1441/ATC_MiThermometer)**
 <br />(stock firmware is not supported)
+<br />Available eg. from [Banggood](https://www.banggood.com/3Pcs-XIAOMI-Mijia-Bluetooth-Smart-Electric-Digital-Thermometer-Hygrometer-2-p-1595118.html?p=6H24052869562201510Z)
 
 Other beacons that are supported are:
 
