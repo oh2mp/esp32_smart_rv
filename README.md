@@ -12,6 +12,11 @@ The temperatures, pressure, humidity etc. use [Ruuvi tags](https://ruuvi.com/). 
 product and with them there's no need of inventing the wheel again. Only data format V5 (RAWv2) is supported.
 See Ruuvi documentation for setting the right mode.
 
+<span style="color: red; font-weight: bold;">NEW!</span> Now this supports also 
+Xiaomi Mijia Bluetooth Thermometer 2 with 
+[ATC1441 custom firmware](https://github.com/atc1441/ATC_MiThermometer)
+(stock firmware is not supported)
+
 Other beacons that are supported are:
 
 - [ESP32 Water sensor](https://github.com/oh2mp/esp32_watersensor)
