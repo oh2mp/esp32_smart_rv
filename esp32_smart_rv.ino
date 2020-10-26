@@ -28,22 +28,39 @@ TFT_eSPI tft = TFT_eSPI();
 #define BUTTON 12                // push button for lightness and long press starts portal
 #define APTIMEOUT 180000         // Portal timeout. Reboot after ms if no activity.
 
-#define MAX_TAGS 8
+#define MAX_TAGS 12
 #define BLLED 19                 // backlight led
+#define TFT_LOGOCOLOR 0x3186     // rgb565 for #333333
+
+// Tag type enumerations
+#define TAG_RUUVI  1
+#define TAG_MIJIA  2
+#define TAG_ENERGY 3
+#define TAG_WATER  4
+#define TAG_FLAME  5
 
 char tagdata[MAX_TAGS][25];      // space for raw tag data unparsed
 char tagname[MAX_TAGS][24];      // tag names
 char tagmac[MAX_TAGS][18];       // tag macs
-int tagrssi[MAX_TAGS];           // RSSI for each tag
 uint32_t tagtime[MAX_TAGS];      // time when a tag was heard last time
+uint8_t tagtype[MAX_TAGS];       // "cached" value for tag type
 
 int screentag = 0;
+int screenslot = 0;
 TaskHandle_t screentask = NULL;
+TaskHandle_t buttontask = NULL;
 
 int tank_volume = 100;
 int flame_threshold = 100;
 char miscread[8];
-uint8_t brightness = 64;
+uint8_t brightness = 5;
+uint8_t last_brightness = 5;
+
+volatile int buttonintrs = 0;
+volatile bool buttonstate;
+volatile uint32_t debounce = 0;
+
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 WebServer server(80);
 IPAddress apIP(192,168,4,1);             // portal ip address
@@ -52,7 +69,7 @@ const char my_ssid[] = "ESP32 Smart RV"; // AP SSID
 uint32_t portal_timer = 0;
 uint32_t request_timer = 0;
 uint32_t last_bri = 0;
-uint8_t last_button = 1;
+
 char heardtags[MAX_TAGS][18];
 
 File file;
@@ -71,7 +88,6 @@ const uint16_t tempcolors[] = {
 uint8_t getTagIndex(const char *mac) {
     for (uint8_t i = 0; i < MAX_TAGS; i++) {
         if (strcmp(tagmac[i],mac) == 0) {
-            return i;
         }
     }
     return 0xFF; // no tag with this mac found
@@ -81,18 +97,21 @@ uint8_t getTagIndex(const char *mac) {
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advDev) {
         uint8_t taginx = getTagIndex(advDev.getAddress().toString().c_str());
-        
+
         // we are interested about known and saved BLE devices only
         if (taginx == 0xFF) return;
         if (tagname[taginx][0] == 0) return;
+
+        Serial.printf("BLE callback: ID=%d; %s; %s\n",taginx, tagname[taginx], advDev.toString().c_str());
+        
         tagtime[taginx] = millis();
-        tagrssi[taginx] = advDev.getRSSI();
         memset(tagdata[taginx],0,sizeof(tagdata[taginx]));
  
         // Ruuvi tags (Manufacturer ID 0x0499) with data format V5 only
         if (advDev.getManufacturerData()[0] == 0x99 && advDev.getManufacturerData()[1] == 4
             && advDev.getManufacturerData()[2] == 5) {
 
+            tagtype[taginx] = TAG_RUUVI;
             for (uint8_t i = 0; i < sizeof(advDev.getManufacturerData()); i++) {
                 tagdata[taginx][i] = advDev.getManufacturerData()[i];
             }
@@ -110,11 +129,41 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
                 for (uint8_t i = 0; i < sizeof(advDev.getManufacturerData()); i++) {
                     tagdata[taginx][i] = advDev.getManufacturerData()[i];
                 }
+                switch(sid) {
+                    case 0xE948:
+                        tagtype[taginx] = TAG_WATER;
+                        break;
+                    case 0x1A13:
+                        tagtype[taginx] = TAG_FLAME;
+                        break;
+                    case 0xACDC:
+                        tagtype[taginx] = TAG_ENERGY;
+                        break;
+                }
             }
         }
-        Serial.printf("BLE callback: %d %s ",int(taginx),advDev.getAddress().toString().c_str());
-        for (uint8_t i = 0; i < sizeof(tagdata[taginx]); i++) {
-             Serial.printf("%02x",tagdata[taginx][i]);
+
+        /* This may look silly, but there might be a bug in the library.
+         * If we don't read address and name, the getPayload may return broken data.
+         * DON'T REMOVE that empty print on the next line.
+         */
+        Serial.printf("",advDev.getAddress().toString().c_str(), advDev.getName().c_str());
+        uint8_t payload[32];
+        memcpy(payload, advDev.getPayload(), 32);
+
+        /* Xiaomi Mijia thermometer with atc1441 custom firmware. 
+         *  Check indicators from the full payload because that FW doesn't send it in manufacturerdata.
+         *  
+         *  https://github.com/atc1441/ATC_MiThermometer
+         */
+        if ((memcmp(payload+2,"\x1a\x18",2) == 0 && memcmp(payload+19,"ATC_",4) == 0) || tagtype[taginx] == TAG_MIJIA) {
+            memcpy(tagdata[taginx],payload,32);
+            tagtype[taginx] = TAG_MIJIA;
+        }
+
+        Serial.print("     Payload: ");
+        for (uint8_t i = 0; i < 32; i++) {
+             Serial.printf("%02x",payload[i]);
         }
         Serial.print("\n");
     }
@@ -124,14 +173,27 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advDev) {
         uint8_t taginx = getTagIndex(advDev.getAddress().toString().c_str());
+        uint8_t ttype = 0;
 
         // skip known tags, we are trying to find new
         if (taginx != 0xFF) return;
+
+        Serial.printf("Heard %s %s\nPayload: ",advDev.toString().c_str(),advDev.getName().c_str());
         
-        // we are interested only about Ruuvi tags (Manufacturer ID 0x0499)
-        // and self made tags that have Espressif ID 0x02E5
+        uint8_t payload[32];
+        memcpy(payload, advDev.getPayload(), 32);
+        for (uint8_t i = 0; i < 32; i++) {
+             Serial.printf("%02x",payload[i]);
+        }    
+        Serial.printf("\n");
+               
+        /* we are interested only about Ruuvi tags (Manufacturer ID 0x0499)
+         *  and self made tags that have Espressif ID 0x02E5
+         *  and Xiaomi Mijia thermometer with atc1441 custom firmware
+         */
         if ((advDev.getManufacturerData()[0] == 0x99 && advDev.getManufacturerData()[1] == 4)
-            || (advDev.getManufacturerData()[0] == 0xE5 && advDev.getManufacturerData()[1] == 2)) {
+            || (advDev.getManufacturerData()[0] == 0xE5 && advDev.getManufacturerData()[1] == 2)
+            || (memcmp(payload+2,"\x1a\x18",2) == 0 && memcmp(payload+19,"ATC_",4) == 0)) {
             for (uint8_t i = 0; i < MAX_TAGS; i++) {
                  if (strlen(heardtags[i]) == 0) {
                      strcpy(heardtags[i],advDev.getAddress().toString().c_str());
@@ -139,6 +201,8 @@ class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
                      break;
                  }
             }
+        } else {
+            Serial.print("Ignoring unsupported device.\n");
         }
     }
 };
@@ -172,7 +236,55 @@ void loadSavedTags() {
         file.close();
     }
 }
+/* ------------------------------------------------------------------------------- */
+void IRAM_ATTR button_isr() {
+    portENTER_CRITICAL_ISR(&mux);
+    buttonintrs++;
+    buttonstate = digitalRead(BUTTON);
+    debounce = xTaskGetTickCount();
+    portEXIT_CRITICAL_ISR(&mux);
+}
+/* ------------------------------------------------------------------------------- */
+void button_task( void * parameter) {
 
+    pinMode(BUTTON, INPUT);
+    pinMode(BUTTON, INPUT_PULLUP);
+
+    attachInterrupt(digitalPinToInterrupt(BUTTON), button_isr, CHANGE);
+
+    uint32_t save_debounce;
+    bool save_laststate;
+    int save;
+
+    while(1) {
+        if (portal_timer == 0) {
+            portENTER_CRITICAL_ISR(&mux);
+            save = buttonintrs;
+            save_debounce = debounce;
+            save_laststate = buttonstate;
+            portEXIT_CRITICAL_ISR(&mux);
+
+            bool current_state = digitalRead(BUTTON);
+
+            if ((save != 0) && (current_state == save_laststate) && (millis() - save_debounce > 10 )) {
+                if (current_state == LOW) {
+                     // Button pressed
+                    request_timer = millis();
+                } else {
+                    // Button released
+                    brightness++;
+                    request_timer = 0;
+                }
+                portENTER_CRITICAL_ISR(&mux);
+                buttonintrs = 0;
+                portEXIT_CRITICAL_ISR(&mux);
+
+                vTaskDelay(10 / portTICK_PERIOD_MS);
+            }
+        }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+}
 /* ------------------------------------------------------------------------------- */
 void setup() {
     tft.init();
@@ -182,13 +294,11 @@ void setup() {
     ledcSetup(0, 5000, 8);
     ledcAttachPin(BLLED, 0);
     ledcWrite(0, 128);
-    
-    pinMode(BUTTON, INPUT_PULLUP);
-
+        
     Serial.begin(115200);
     Serial.println("\n\nESP32 Smart RV by OH2MP 2020");
-
     fce2();
+
     SPIFFS.begin();
     loadSavedTags();
     
@@ -216,23 +326,14 @@ void setup() {
     blescan->setInterval(100);
     blescan->setWindow(99);
     
-    screentaskstart();
-
+    // https://www.freertos.org/a00125.html
+    xTaskCreate(screen_task, "screen", 4096, NULL, 2, &screentask);
+    xTaskCreate(button_task, "button", 4096, NULL, 1, &buttontask); 
+    
     // Reset real time clock
     timeval epoch = {0, 0};
     const timeval *tv = &epoch;
     settimeofday(tv, NULL);
-
-    if (digitalRead(BUTTON) == LOW) {
-        startPortal();   
-    }
-}
-
-/* ------------------------------------------------------------------------------- */
-// https://www.freertos.org/a00125.html
-
-void screentaskstart() {
-    xTaskCreate(next_tag_to_screen, "screen", 4096, NULL, 2, &screentask); 
 }
 
 /* ------------------------------------------------------------------------------- */
@@ -263,33 +364,24 @@ void loop() {
         server.handleClient();
     }
 
-    if (digitalRead(BUTTON) == LOW) {
-        if (last_button == HIGH) {
+    if (brightness != last_brightness && portal_timer == 0) {
+            if (brightness > 10) brightness = 0;    
+            if (screenslot == 0) screenslot = 1;
+            
             char txt[8];
-            brightness += 12;
-            if (brightness > 120) brightness = 0;
-            Serial.printf("bri: %d\n",brightness);
-            ledcWrite(0, brightness+8);
+            Serial.printf("brightness: %d\n",brightness);
+            ledcWrite(0, brightness*12+8);
             last_bri = millis();
-            tft.fillRect(0,3,TFTW,TFTH/3-3,TFT_WHITE);
+            tft.fillRect(0,0,TFTW,TFTH/3-6,TFT_WHITE);
             tft.setTextDatum(TC_DATUM);
             tft.setTextColor(TFT_BLACK,TFT_WHITE);
             tft.loadFont(bigfont);
-            sprintf(txt,"\x5C %d", brightness/12);
+            sprintf(txt,"\x5C %d", brightness);
             tft.drawString(txt,int(TFTW/2),36);
             tft.unloadFont();
-            last_button = LOW;           
-        }
-    
-        if (millis() - portal_timer > 30000 && portal_timer > 0) ESP.restart();
-        if (request_timer == 0) {
-            request_timer = millis();
-        }
-    } else {
-        request_timer = 0;
-        last_button = HIGH;
+            last_brightness = brightness;
     }
-    if (request_timer > 0 && millis() - request_timer > 5000) {
+    if (request_timer > 0 && millis() - request_timer > 5000 && portal_timer == 0) {
         startPortal();
     }
     if (millis() - portal_timer > APTIMEOUT && portal_timer > 0) {
@@ -300,8 +392,11 @@ void loop() {
 }
 
 /* ------------------------------------------------------------------------------- */
-void next_tag_to_screen(void * param) {
-   
+/*
+ * This task handles the screen updating
+ */
+void screen_task(void * param) {
+    
     char displaytxt[24];
     char mfdata[25];
     short temperature = 0;
@@ -314,14 +409,15 @@ void next_tag_to_screen(void * param) {
     uint32_t wh;
     int basey = 0;
     
-    while(portal_timer == 0) {
-        if (strlen(tagname[screentag]) > 0) {
+    while(1) {
+        if (strlen(tagname[screentag]) > 0 && portal_timer == 0) {
             memset(displaytxt,0,sizeof(displaytxt));
             strcat(displaytxt,tagname[screentag]);
             memcpy(mfdata,tagdata[screentag],sizeof(mfdata));
         
             displaytxt[15] = 0; // shorten name to fit (hopefully)
-            basey = (TFTH / 3) * (screentag % 3) +3;
+            // basey = (TFTH / 3) * (screentag % 3) +3;
+            basey = (TFTH / 3) * screenslot;
             tft.fillRect(0,basey,TFTW,TFTH/3-3,TFT_BLACK);
 
             tft.loadFont(midfont);
@@ -344,7 +440,7 @@ void next_tag_to_screen(void * param) {
             }
             
             // Ruuvi tags
-            if (mfdata[0] == 0x99 && mfdata[1] == 4) {
+            if ((mfdata[0] == 0x99 && mfdata[1] == 4) || tagtype[screentag] == TAG_RUUVI) {
                 tft.loadFont(bigfont);
                 
                 if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
@@ -378,12 +474,17 @@ void next_tag_to_screen(void * param) {
                     tft.loadFont(tinyfont);
                     tft.drawString(displaytxt,int(TFTW/2),basey+80);
                     tft.unloadFont();
+
+                    // Ruuvi logo
+                    tft.fillCircle(TFTW-17,basey+50,12,TFT_LOGOCOLOR);
+                    tft.fillCircle(TFTW-14,basey+50,7,TFT_BLACK);
+                    tft.fillCircle(TFTW-20,basey+45,4,TFT_LOGOCOLOR);
                 }
             }
             // Other tags which have manufacturer id 0x02E5 (Espressif)
             if (mfdata[0] == 0xE5 && mfdata[1] == 2) {
                 // water gauge
-                if (mfdata[2] == 0x48 && mfdata[3] == 0xE9) {
+                if ((mfdata[2] == 0x48 && mfdata[3] == 0xE9) || tagtype[screentag] == TAG_WATER) {
                     tft.loadFont(bigfont);
                     if (tank_volume > 0) {
                         // This is liters. If you are retarded and use gallons or buckets (pronounced bouquet) for measuring liquid volume, make your own glyph.
@@ -403,7 +504,7 @@ void next_tag_to_screen(void * param) {
                     tft.unloadFont();
                 }
                 // flame thermocouple
-                if (mfdata[2] == 0x13 && mfdata[3] == 0x1A) {
+                if ((mfdata[2] == 0x13 && mfdata[3] == 0x1A) || tagtype[screentag] == TAG_FLAME) {
                     // get the temperature
                     foo = (((unsigned short)mfdata[5] << 8) + (unsigned short)mfdata[4]) >> 2;
                     tft.loadFont(bigfont);
@@ -422,7 +523,7 @@ void next_tag_to_screen(void * param) {
                     tft.unloadFont();
                 }
                 // energy meter pulse counter
-                if (mfdata[2] == 0xDC && mfdata[3] == 0xAC) {
+                if ((mfdata[2] == 0xDC && mfdata[3] == 0xAC) || tagtype[screentag] == TAG_ENERGY) {
                     tft.loadFont(bigfont);
                     tft.setTextColor(TFT_SKYBLUE,TFT_BLACK);
                     wh = (((uint32_t)mfdata[11] << 24) + ((uint32_t)mfdata[10] << 16) + ((uint32_t)mfdata[9] << 8) + (uint32_t)mfdata[8]);
@@ -444,13 +545,73 @@ void next_tag_to_screen(void * param) {
                     tft.unloadFont();
                 }
             }
+            // Xiaomi Mijia thermometer with atc1441 custom firmware
+            // there is tag name beginning with ATC_ in payload offset 19
+            if (strncmp(mfdata+19,"ATC_",4) == 0 || tagtype[screentag] == TAG_MIJIA) {
+                tft.loadFont(bigfont);
+                
+                if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
+                    sprintf(displaytxt,"\x26"); // 0x26 = warning triangle sign in the bigfont
+                    tft.setTextColor(TFT_RED,TFT_BLACK);
+                    tft.drawString(displaytxt,int(TFTW/2),basey+32);
+                    tft.unloadFont();    
+                } else {
+                    temperature = ((short)mfdata[10]<<8) | (unsigned short)mfdata[11];
+                                  
+                    sprintf(displaytxt,"%.1f\x29",temperature*0.1); // 0x29 = degree sign in the bigfont
+
+                    int colinx = int(temperature*0.1+20);
+                    if (colinx < 0) {colinx = 0;}
+                    if (colinx > 55) {colinx = 55;}
+                    tft.setTextColor(tempcolors[colinx],TFT_BLACK);
+                
+                    tft.loadFont(bigfont);
+                    tft.drawString(displaytxt,int(TFTW/2),basey+32);
+                    tft.unloadFont();
+                    tft.setTextColor(TFT_WHITE,TFT_BLACK);
+                
+                    humidity = (unsigned short)mfdata[12];
+                    voltage = ((short)mfdata[14]<<8) | (unsigned short)mfdata[15];
+                    sprintf(displaytxt,"RH %.0f%%   %.2f V",(float)humidity, voltage/1000);
+                
+                    tft.loadFont(tinyfont);
+                    tft.drawString(displaytxt,int(TFTW/2),basey+80);
+                    tft.unloadFont();
+
+                    // Xiaomi logo
+                    tft.fillCircle(TFTW-14,basey+46,4,TFT_LOGOCOLOR);
+                    tft.fillCircle(TFTW-18,basey+50,4,TFT_BLACK);
+                    tft.fillRect(TFTW-29,basey+42,16,4,TFT_LOGOCOLOR);
+                    tft.fillRect(TFTW-29,basey+42,4,20,TFT_LOGOCOLOR);
+                    tft.fillRect(TFTW-21,basey+50,4,12,TFT_LOGOCOLOR);
+                    tft.fillRect(TFTW-13,basey+48,4,14,TFT_LOGOCOLOR);
+                    tft.fillRect(TFTW-5,basey+42,4,20,TFT_LOGOCOLOR);
+                }              
+            }
+            
             if (basey < TFTH/2) {
                 tft.drawLine(0,basey+TFTH/3-6,TFTW-1,basey+TFTH/3-6,TFT_LIGHTGREY);
             }
             screentag++;
             if (tagname[screentag][0] == 0 || screentag >= MAX_TAGS) {screentag = 0;}
+            screenslot++;
+            if (screenslot > 2) {screenslot = 0;}
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
-        vTaskDelay(2500 / portTICK_PERIOD_MS);
+        if (portal_timer > 0) {
+            tft.loadFont(midfont);
+            tft.fillRect(0,TFTH-24,TFTW,22,TFT_BLACK);
+            tft.setCursor(TFTW/2,TFTH-24);
+            if (WiFi.getMode() == WIFI_AP) {
+                sprintf(displaytxt,"%d",int(APTIMEOUT/1000)-int((millis()-portal_timer)/1000));
+            } else {
+                sprintf(displaytxt,"%d",11-int((millis()-portal_timer)/1000));
+            }
+            tft.drawString(displaytxt,TFTW/2,TFTH-24);
+            tft.unloadFont();
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+        }
+        vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
 /* ------------------------------------------------------------------------------- */
@@ -464,8 +625,13 @@ void next_tag_to_screen(void * param) {
 
 void startPortal() {
     char displaytxt[128];
+
+    // disable button
+    portENTER_CRITICAL_ISR(&mux);
+    vTaskDelete(buttontask);
+    detachInterrupt(digitalPinToInterrupt(BUTTON));
+    portEXIT_CRITICAL_ISR(&mux);
     
-    vTaskDelete(screentask);
     ledcWrite(0, 128);
 
     tft.fillScreen(TFT_BLACK);
@@ -482,35 +648,35 @@ void startPortal() {
         memset(heardtags[i],0,sizeof(heardtags[i]));
     }
     Serial.print("\nListening 10 seconds for new tags...\n");
-//    digitalWrite(LED, HIGH);
 
-    // First listen 10 seconds to find new tags.
+    // First listen 11 seconds to find new tags.
     blescan->setAdvertisedDeviceCallbacks(new ScannedDeviceCallbacks());
     blescan->setActiveScan(true);
     blescan->setInterval(100);
     blescan->setWindow(99);
-    BLEScanResults foundDevices = blescan->start(10, false);
-    blescan->clearResults();
+    BLEScanResults foundDevices = blescan->start(11, false);
     blescan->stop();
+    blescan->clearResults();
     blescan = NULL;
     BLEDevice::deinit(true);
-//    digitalWrite(LED, LOW);
+
+    portal_timer = millis();
+    tft.loadFont(bigfont);
+    tft.setTextColor(TFT_WHITE,TFT_BLACK);
+    tft.fillScreen(TFT_BLACK);
+    tft.drawString("\x3e",int(TFTW/2),30); // print config symbol
+    tft.unloadFont();
 
     WiFi.disconnect();
     delay(100);
-
     WiFi.mode(WIFI_AP);
     WiFi.softAP(my_ssid);
     delay(2000);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
 
-    tft.fillScreen(TFT_BLACK);
-    tft.drawString("\x3e",int(TFTW/2),30); // print config symbol
-    tft.unloadFont();
-    
     tft.setTextSize(2);
     sprintf(displaytxt,"WiFi SSID\n\n%s\n\n\n\nURL\n\nhttp://%s/", my_ssid, my_ip);
-    tft.setCursor(0,120);
+    tft.setCursor(0,110);
     tft.print(displaytxt);
     
     server.on("/", httpRoot);
@@ -690,6 +856,7 @@ void httpBoot() {
 /* ------------------------------------------------------------------------------- */
 void fce2() {
     // Have fun :)
+    
     const char t[6][90] = {{0xa,0x20,0x20,0x20,0x20,0x2a,0x2a,0x2a,0x2a,0x20,0x43,0x4f,0x4d,0x4d,0x4f,0x44,0x4f,0x52,0x45,0x20,0x36,0x34,0x20,0x42,
     0x41,0x53,0x49,0x43,0x20,0x56,0x32,0x20,0x2a,0x2a,0x2a,0x2a,0xa,0xa,0x20,0x36,0x34,0x4b,0x20,0x52,0x41,0x4d,0x20,0x53,0x59,0x53,0x54,0x45,0x4d,
     0x20,0x20,0x33,0x38,0x39,0x31,0x31,0x20,0x42,0x41,0x53,0x49,0x43,0x20,0x42,0x59,0x54,0x45,0x53,0x20,0x46,0x52,0x45,0x45,0xa,0xa,0x52,0x45,0x41,
