@@ -88,10 +88,14 @@ const uint16_t tempcolors[] = {
 uint8_t getTagIndex(const char *mac) {
     for (uint8_t i = 0; i < MAX_TAGS; i++) {
         if (strcmp(tagmac[i],mac) == 0) {
+            return i;
         }
     }
     return 0xFF; // no tag with this mac found
 }
+
+/* ------------------------------------------------------------------------------- */
+/* Known devices callback
 /* ------------------------------------------------------------------------------- */
 
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
@@ -169,6 +173,8 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     }
 };
 
+/* ------------------------------------------------------------------------------- */
+/* Find new devices
 /* ------------------------------------------------------------------------------- */
 class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advDev) {
@@ -603,7 +609,8 @@ void screen_task(void * param) {
             tft.fillRect(0,TFTH-24,TFTW,22,TFT_BLACK);
             tft.setCursor(TFTW/2,TFTH-24);
             if (WiFi.getMode() == WIFI_AP) {
-                sprintf(displaytxt,"%d",int(APTIMEOUT/1000)-int((millis()-portal_timer)/1000));
+                int secs = int(APTIMEOUT/1000)-int((millis()-portal_timer)/1000);
+                sprintf(displaytxt,"%d:%02d",int(secs / 60),secs % 60);
             } else {
                 sprintf(displaytxt,"%d",11-int((millis()-portal_timer)/1000));
             }
