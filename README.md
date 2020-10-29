@@ -13,7 +13,7 @@ product and with them there's no need of inventing the wheel again. Only data fo
 See Ruuvi documentation for setting the right mode.
 
 **NEW! Now this supports also Xiaomi Mijia Bluetooth Thermometer 2 with 
-[ATC1441 custom firmware](https://github.com/atc1441/ATC_MiThermometer)**
+[ATC_MiThermometer](https://github.com/atc1441/ATC_MiThermometer)** custom firmware.
 <br />(stock firmware is not supported)
 <br />Available eg. from [Banggood](https://www.banggood.com/3Pcs-XIAOMI-Mijia-Bluetooth-Smart-Electric-Digital-Thermometer-Hygrometer-2-p-1595118.html?p=6H24052869562201510Z)
 
@@ -76,7 +76,7 @@ to upload the files in the data directory. There are the html and css files need
 
 If the button is pressed over 5 seconds, the unit switches to the portal mode.
 
-In the start of portal mode the ESP32 is listening 10 seconds for new beacons.
+In the start of portal mode the ESP32 is listening 11 seconds for new beacons.
 WiFi AP is not listening yet at that period and a listening symbol is visible on the screen. After you see
 the AP info on the screen, connect to WiFi **ESP32 Smart RV**, accept that there's no internet connection
 and take your browser to !http://192.168.4.1/
