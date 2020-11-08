@@ -81,9 +81,18 @@ table {
 }
 
 td {
-   padding: 2px;
    margin: 0;
    text-align: center;
+   padding: 5px 0px 0px 0px; 
+   position: relative; 
+   bottom: 0px;
+}
+
+svg {
+   padding: 0px; 
+   margin: 5px 0 0 0; 
+   bottom: 0px; 
+   position: relative;
 }
 
 .even {

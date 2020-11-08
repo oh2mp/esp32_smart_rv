@@ -96,6 +96,9 @@ easiest way is to use Ruuvi software. For other beacons eg.
 [BLE Scanner by Bluepixel Technologies](https://play.google.com/store/apps/details?id=com.macdom.ble.blescanner)
 is a suitable app for Android.
 
+The portal mode has a timeout. The unit will reboot after 2 minutes of inactivity and the remaining time
+is visible on the screen. This timeout can be changed from line #define APTIMEOUT
+
 There's almost no sanity checks for the data sent from the forms. This is not a public web service and if 
 you want to mess up your board or try to make a denial of service using eg. buffer overflows, feel free to 
 do so.

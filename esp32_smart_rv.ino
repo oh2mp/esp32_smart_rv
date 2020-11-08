@@ -10,14 +10,11 @@
 #include <WebServer.h>
 #include <SPIFFS.h>
 #include <time.h>
-#include <esp_int_wdt.h>
-#include <esp_task_wdt.h>
 #include "TFT_eSPI.h"
 TFT_eSPI tft = TFT_eSPI();
 #define TFTW 240 // tft width
 #define TFTH 320 // tft height
 
-#include "strutils.h"
 #include "tftfonts.h"
 
 #include <BLEDevice.h>
@@ -26,25 +23,29 @@ TFT_eSPI tft = TFT_eSPI();
 #include <BLEAdvertisedDevice.h>
 
 #define BUTTON 12                // push button for lightness and long press starts portal
-#define APTIMEOUT 180000         // Portal timeout. Reboot after ms if no activity.
+#define APTIMEOUT 120000         // Portal timeout. Reboot after ms if no activity.
 
 #define MAX_TAGS 12
 #define BLLED 19                 // backlight led
 #define TFT_LOGOCOLOR 0x3186     // rgb565 for #333333
+                                 //   nice onverter: http://www.rinkydinkelectronics.com/calc_rgb565.php
 
-// Tag type enumerations
+// Tag type enumerations and names
 #define TAG_RUUVI  1
 #define TAG_MIJIA  2
 #define TAG_ENERGY 3
 #define TAG_WATER  4
 #define TAG_FLAME  5
 
-char tagdata[MAX_TAGS][25];      // space for raw tag data unparsed
+const char type_name[6][8] = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame"};
+// end of tag type enumerations and names
+
+char tagdata[MAX_TAGS][32];      // space for raw tag data unparsed
 char tagname[MAX_TAGS][24];      // tag names
 char tagmac[MAX_TAGS][18];       // tag macs
 uint32_t tagtime[MAX_TAGS];      // time when a tag was heard last time
 uint8_t tagtype[MAX_TAGS];       // "cached" value for tag type
-
+uint8_t tagcount = 0;            // total amount of known tags
 int screentag = 0;
 int screenslot = 0;
 TaskHandle_t screentask = NULL;
@@ -71,6 +72,7 @@ uint32_t request_timer = 0;
 uint32_t last_bri = 0;
 
 char heardtags[MAX_TAGS][18];
+uint8_t heardtagtype[MAX_TAGS];
 
 File file;
 BLEScan* blescan;
@@ -95,115 +97,101 @@ uint8_t getTagIndex(const char *mac) {
 }
 
 /* ------------------------------------------------------------------------------- */
+/* Detect tag type from payload and mac
+ *  
+ * Ruuvi tags (Manufacturer ID 0x0499) with data format V5 only
+ *
+ * Homemade tags (Manufacturer ID 0x02E5 Espressif Inc)
+ *   The sketches are identified by next two bytes after MFID.
+ *   0xE948 water tank gauge https://github.com/oh2mp/esp32_watersensor/
+ *   0x1A13 thermocouple sensor for gas flame https://github.com/oh2mp/esp32_max6675_beacon/
+ *   0xACDC energy meter pulse counter 
+ *   
+ * Xiaomi Mijia thermometer with atc1441 custom firmware. 
+ *   https://github.com/atc1441/ATC_MiThermometer
+ *
+ */
+
+uint8_t tagTypeFromPayload(const uint8_t *payload, const uint8_t *mac) {
+    // Has manufacturerdata? If so, check if this is known type.
+    if (memcmp(payload,"\x02\x01\x06",3) == 0 && payload[4] == 0xFF) {
+        if (memcmp(payload+5,"\x99\x04\x05",3) == 0)      return TAG_RUUVI;
+        if (memcmp(payload+5,"\xE5\x02\xDC\xAC",4) == 0)  return TAG_ENERGY;
+        if (memcmp(payload+5,"\xE5\x02\x48\xE9",4) == 0)  return TAG_WATER;
+        if (memcmp(payload+5,"\xE5\x02\x13\x1A",4) == 0)  return TAG_FLAME;
+    }
+    // ATC_MiThermometer? The data should contain 10161a18 in the beginning and mac at offset 4.
+    if (memcmp(payload,"\x10\x16\x1A\x18",4) == 0 && memcmp(mac,payload+4,6) == 0) return TAG_MIJIA;
+
+    return 0xFF; // unknown
+}
+
+/* ------------------------------------------------------------------------------- */
 /* Known devices callback
 /* ------------------------------------------------------------------------------- */
 
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advDev) {
+        uint8_t payload[32];
         uint8_t taginx = getTagIndex(advDev.getAddress().toString().c_str());
 
         // we are interested about known and saved BLE devices only
-        if (taginx == 0xFF) return;
-        if (tagname[taginx][0] == 0) return;
+        if (taginx == 0xFF || tagname[taginx][0] == 0) return;
 
-        Serial.printf("BLE callback: ID=%d; %s; %s\n",taginx, tagname[taginx], advDev.toString().c_str());
-        
+        memset(payload,0,32);
+        memcpy(payload, advDev.getPayload(), 32);
         tagtime[taginx] = millis();
         memset(tagdata[taginx],0,sizeof(tagdata[taginx]));
- 
-        // Ruuvi tags (Manufacturer ID 0x0499) with data format V5 only
-        if (advDev.getManufacturerData()[0] == 0x99 && advDev.getManufacturerData()[1] == 4
-            && advDev.getManufacturerData()[2] == 5) {
-
-            tagtype[taginx] = TAG_RUUVI;
-            for (uint8_t i = 0; i < sizeof(advDev.getManufacturerData()); i++) {
-                tagdata[taginx][i] = advDev.getManufacturerData()[i];
-            }
+        
+        // Don't we know the type of this device yet?
+        if (tagtype[taginx] == 0) {
+            uint8_t mac[6];
+            tagtype[taginx] = tagTypeFromPayload(payload,mac);
         }
-        /* Homemade tags (Manufacturer ID 0x02E5 Espressif Inc)
-         *   The sketches are identified by next two bytes after MFID.
-         *   0xE948 water tank gauge https://github.com/oh2mp/esp32_watersensor/
-         *   0x1A13 thermocouple sensor for gas flame https://github.com/oh2mp/esp32_max6675_beacon/
-         *   0xACDC energy meter pulse counter 
-         */
-        uint16_t sid = advDev.getManufacturerData()[2] + advDev.getManufacturerData()[3] * 256;
-        if (advDev.getManufacturerData()[0] == 0xE5 && advDev.getManufacturerData()[1] == 2) {
-            if (sid == 0xE948 || sid == 0x1A13 || sid == 0xACDC) {
-                memset(tagdata[taginx],0,sizeof(tagdata[taginx]));
-                for (uint8_t i = 0; i < sizeof(advDev.getManufacturerData()); i++) {
-                    tagdata[taginx][i] = advDev.getManufacturerData()[i];
-                }
-                switch(sid) {
-                    case 0xE948:
-                        tagtype[taginx] = TAG_WATER;
-                        break;
-                    case 0x1A13:
-                        tagtype[taginx] = TAG_FLAME;
-                        break;
-                    case 0xACDC:
-                        tagtype[taginx] = TAG_ENERGY;
-                        break;
-                }
-            }
-        }
-
-        /* This may look silly, but there might be a bug in the library.
-         * If we don't read address and name, the getPayload may return broken data.
-         * DON'T REMOVE that empty print on the next line.
-         */
-        Serial.printf("",advDev.getAddress().toString().c_str(), advDev.getName().c_str());
-        uint8_t payload[32];
-        memcpy(payload, advDev.getPayload(), 32);
-
-        /* Xiaomi Mijia thermometer with atc1441 custom firmware. 
-         *  Check indicators from the full payload because that FW doesn't send it in manufacturerdata.
-         *  
-         *  https://github.com/atc1441/ATC_MiThermometer
-         */
-        if ((memcmp(payload+2,"\x1a\x18",2) == 0 && memcmp(payload+19,"ATC_",4) == 0) || tagtype[taginx] == TAG_MIJIA) {
-            memcpy(tagdata[taginx],payload,32);
-            tagtype[taginx] = TAG_MIJIA;
-        }
-
-        Serial.print("     Payload: ");
+        // Copy the payload to tagdata
+        memcpy(tagdata[taginx],payload,32); 
+        
+        Serial.printf("BLE callback: payload=");
         for (uint8_t i = 0; i < 32; i++) {
              Serial.printf("%02x",payload[i]);
         }
-        Serial.print("\n");
+        Serial.printf("; ID=%d; type=%d; addr=%s; name=%s\n",taginx, tagtype[taginx], tagmac[taginx], tagname[taginx]);
     }
 };
 
 /* ------------------------------------------------------------------------------- */
-/* Find new devices
+/* Find new devices when portal is started
 /* ------------------------------------------------------------------------------- */
 class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advDev) {
+        uint8_t payload[32];
         uint8_t taginx = getTagIndex(advDev.getAddress().toString().c_str());
-        uint8_t ttype = 0;
-
-        // skip known tags, we are trying to find new
-        if (taginx != 0xFF) return;
 
         Serial.printf("Heard %s %s\nPayload: ",advDev.toString().c_str(),advDev.getName().c_str());
         
-        uint8_t payload[32];
         memcpy(payload, advDev.getPayload(), 32);
         for (uint8_t i = 0; i < 32; i++) {
              Serial.printf("%02x",payload[i]);
         }    
         Serial.printf("\n");
+
+        // skip known tags, we are trying to find new
+        if (taginx != 0xFF) return;
                
         /* we are interested only about Ruuvi tags (Manufacturer ID 0x0499)
          *  and self made tags that have Espressif ID 0x02E5
          *  and Xiaomi Mijia thermometer with atc1441 custom firmware
          */
-        if ((advDev.getManufacturerData()[0] == 0x99 && advDev.getManufacturerData()[1] == 4)
-            || (advDev.getManufacturerData()[0] == 0xE5 && advDev.getManufacturerData()[1] == 2)
-            || (memcmp(payload+2,"\x1a\x18",2) == 0 && memcmp(payload+19,"ATC_",4) == 0)) {
+        uint8_t mac[6];
+        memcpy(mac,advDev.getAddress().getNative(),6);
+        uint8_t htype = tagTypeFromPayload(payload,mac);         
+        
+        if (htype != 0xFF && htype != 0) {
             for (uint8_t i = 0; i < MAX_TAGS; i++) {
                  if (strlen(heardtags[i]) == 0) {
                      strcpy(heardtags[i],advDev.getAddress().toString().c_str());
-                     Serial.printf("Heard new tag: %s\n",heardtags[i]);
+                     heardtagtype[i] = htype;
+                     Serial.printf("Heard new tag: %s %s\n",heardtags[i],type_name[htype]);
                      break;
                  }
             }
@@ -217,8 +205,9 @@ class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 void loadSavedTags() {
     char sname[25];
     char smac[18];
-    for (int i = 0; i < MAX_TAGS; i++) {
+    for (uint8_t i = 0; i < MAX_TAGS; i++) {
         tagtime[i] = 0;
+        tagtype[i] = 0;
         memset(tagname[i], 0, sizeof(tagname[i]));
         memset(tagdata[i], 0, sizeof(tagdata[i]));
     }
@@ -232,12 +221,14 @@ void loadSavedTags() {
             
             file.readBytesUntil('\t', smac, 18);
             file.readBytesUntil('\n', sname, 25);
-            trimr(smac);
-            trimr(sname);
+            while (isspace(smac[strlen(smac)-1]) && strlen(smac) > 0) smac[strlen(smac)-1] = 0;
+            while (isspace(sname[strlen(sname)-1]) && strlen(sname) > 0) sname[strlen(sname)-1] = 0;
+            if (sname[strlen(sname)-1] == 13) sname[strlen(sname)-1] = 0;
             strcpy(tagmac[foo],smac);
             strcpy(tagname[foo],sname);
             foo++;
             if (foo >= MAX_TAGS) break;
+            tagcount++;
         }
         file.close();
     }
@@ -274,7 +265,7 @@ void button_task( void * parameter) {
 
             if ((save != 0) && (current_state == save_laststate) && (millis() - save_debounce > 10 )) {
                 if (current_state == LOW) {
-                     // Button pressed
+                    // Button pressed
                     request_timer = millis();
                 } else {
                     // Button released
@@ -303,7 +294,7 @@ void setup() {
         
     Serial.begin(115200);
     Serial.println("\n\nESP32 Smart RV by OH2MP 2020");
-    fce2();
+    //fce2();
 
     SPIFFS.begin();
     loadSavedTags();
@@ -312,7 +303,7 @@ void setup() {
         file = SPIFFS.open("/misc.txt", "r");
         memset(miscread, '\0', sizeof(miscread)); 
         file.readBytesUntil('\n', miscread, 8);
-        flame_threshold = atoi(miscread);        
+        flame_threshold = atoi(miscread);
         Serial.printf("Flame threshold %d\n",flame_threshold);
         memset(miscread, '\0', sizeof(miscread));
         file.readBytesUntil('\n', miscread, 8);
@@ -331,7 +322,7 @@ void setup() {
     blescan->setActiveScan(true);
     blescan->setInterval(100);
     blescan->setWindow(99);
-    
+
     // https://www.freertos.org/a00125.html
     xTaskCreate(screen_task, "screen", 4096, NULL, 2, &screentask);
     xTaskCreate(button_task, "button", 4096, NULL, 1, &buttontask); 
@@ -349,7 +340,7 @@ void loop() {
     time(&lt);
     tm = localtime(&lt);
 
-    if (tm->tm_hour*60+tm->tm_min == 1 || tm->tm_hour + tm->tm_min + tm->tm_sec < 5) {
+    if (tm->tm_hour*60+tm->tm_min == 1 || tm->tm_hour + tm->tm_min + tm->tm_sec < 5 || tm->tm_sec == 30) {
 
         if (tm->tm_sec == 0  && portal_timer == 0) {
             timeval epoch = {0, 0};      // A little "misuse" of realtime clock but we don't need it
@@ -363,6 +354,11 @@ void loop() {
             BLEScanResults foundDevices = blescan->start(9, false);
             blescan->clearResults();
             delay(250);
+            /* Something is wrong if zero known tags is heard, so then reboot. 
+             * Possible if all of them are out of range too, but that should not happen anyway.
+             */
+            if (foundDevices.getCount() == 0 && tagcount > 0) ESP.restart();
+            Serial.printf("End scanning ======\n");
         }
     }
     
@@ -371,21 +367,21 @@ void loop() {
     }
 
     if (brightness != last_brightness && portal_timer == 0) {
-            if (brightness > 10) brightness = 0;    
-            if (screenslot == 0) screenslot = 1;
-            
-            char txt[8];
-            Serial.printf("brightness: %d\n",brightness);
-            ledcWrite(0, brightness*12+8);
-            last_bri = millis();
-            tft.fillRect(0,0,TFTW,TFTH/3-6,TFT_WHITE);
-            tft.setTextDatum(TC_DATUM);
-            tft.setTextColor(TFT_BLACK,TFT_WHITE);
-            tft.loadFont(bigfont);
-            sprintf(txt,"\x5C %d", brightness);
-            tft.drawString(txt,int(TFTW/2),36);
-            tft.unloadFont();
-            last_brightness = brightness;
+        if (brightness > 10) brightness = 0;    
+        if (screenslot == 0) screenslot = 1;
+        
+        char txt[8];
+        Serial.printf("brightness: %d\n",brightness);
+        ledcWrite(0, brightness*12+8);
+        last_bri = millis();
+        tft.fillRect(0,0,TFTW,TFTH/3-6,TFT_WHITE);
+        tft.setTextDatum(TC_DATUM);
+        tft.setTextColor(TFT_BLACK,TFT_WHITE);
+        tft.loadFont(bigfont);
+        sprintf(txt,"\x5C %d", brightness);
+        tft.drawString(txt,int(TFTW/2),36);
+        tft.unloadFont();
+        last_brightness = brightness;
     }
     if (request_timer > 0 && millis() - request_timer > 5000 && portal_timer == 0) {
         startPortal();
@@ -404,7 +400,6 @@ void loop() {
 void screen_task(void * param) {
     
     char displaytxt[24];
-    char mfdata[25];
     short temperature = 0;
     int16_t x1, y1;
     uint16_t w, h;
@@ -419,8 +414,7 @@ void screen_task(void * param) {
         if (strlen(tagname[screentag]) > 0 && portal_timer == 0) {
             memset(displaytxt,0,sizeof(displaytxt));
             strcat(displaytxt,tagname[screentag]);
-            memcpy(mfdata,tagdata[screentag],sizeof(mfdata));
-        
+
             displaytxt[15] = 0; // shorten name to fit (hopefully)
             // basey = (TFTH / 3) * (screentag % 3) +3;
             basey = (TFTH / 3) * screenslot;
@@ -433,7 +427,7 @@ void screen_task(void * param) {
             tft.unloadFont();
             
             // No data? Draw NaN-symbol like Ø
-            if (mfdata[0] == 0 && mfdata[1] == 0) {
+            if (tagdata[screentag][0] == 0 && tagdata[screentag][1] == 0) {
                 tft.loadFont(bigfont);
                 if (tagtime[screentag] == 0) {
                     tft.setTextColor(TFT_YELLOW,TFT_BLACK);
@@ -446,7 +440,7 @@ void screen_task(void * param) {
             }
             
             // Ruuvi tags
-            if ((mfdata[0] == 0x99 && mfdata[1] == 4) || tagtype[screentag] == TAG_RUUVI) {
+            if (tagtype[screentag] == TAG_RUUVI) {
                 tft.loadFont(bigfont);
                 
                 if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
@@ -457,7 +451,7 @@ void screen_task(void * param) {
                 } else {
                     // This is Celsius. Only 7 of 195 countries in the World use Fahrenheit,
                     // so if you live in one of those developing countries, you must implement the conversion yourself.
-                    temperature = ((short)mfdata[3]<<8) | (unsigned short)mfdata[4];
+                    temperature = ((short)tagdata[screentag][8]<<8) | (unsigned short)tagdata[screentag][9];
                                   
                     sprintf(displaytxt,"%.1f\x29",temperature*0.005); // 0x29 = degree sign in the bigfont
 
@@ -471,10 +465,10 @@ void screen_task(void * param) {
                     tft.unloadFont();
                     tft.setTextColor(TFT_WHITE,TFT_BLACK);
                 
-                    humidity = ((unsigned short)mfdata[5]<<8) | (unsigned short)mfdata[6];
-                    foo = ((unsigned short)mfdata[15] << 8) + (unsigned short)mfdata[16];
+                    humidity = ((unsigned short)tagdata[screentag][10]<<8) | (unsigned short)tagdata[screentag][11];
+                    foo = ((unsigned short)tagdata[screentag][20] << 8) + (unsigned short)tagdata[screentag][21];
                     voltage = ((double)foo / 32  + 1600)/1000;
-                    pressure    = ((unsigned short)mfdata[7]<<8)  + (unsigned short)mfdata[8] + 50000;
+                    pressure = ((unsigned short)tagdata[screentag][12]<<8) + (unsigned short)tagdata[screentag][13] + 50000;
                     sprintf(displaytxt,"RH %.0f%%  %.2f V  %.0f hPa",(float)humidity*.0025, voltage, pressure/100);
                 
                     tft.loadFont(tinyfont);
@@ -487,73 +481,73 @@ void screen_task(void * param) {
                     tft.fillCircle(TFTW-20,basey+45,4,TFT_LOGOCOLOR);
                 }
             }
-            // Other tags which have manufacturer id 0x02E5 (Espressif)
-            if (mfdata[0] == 0xE5 && mfdata[1] == 2) {
-                // water gauge
-                if ((mfdata[2] == 0x48 && mfdata[3] == 0xE9) || tagtype[screentag] == TAG_WATER) {
-                    tft.loadFont(bigfont);
-                    if (tank_volume > 0) {
-                        // This is liters. If you are retarded and use gallons or buckets (pronounced bouquet) for measuring liquid volume, make your own glyph.
-                        if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
-                            tft.drawString("??\x28",int(TFTW/2),basey+32); // 0x28 = liter symbol "script small L" in the bigfont
-                        } else {
-                            sprintf(displaytxt,"%d\x28",(unsigned int)mfdata[5]);
-                            tft.drawString(displaytxt,int(TFTW/2),basey+32);
-                        }
-                        int baz = TFTW * (unsigned int)mfdata[5] / tank_volume -2;
-                        tft.drawRect(0,basey+80,TFTW,20,TFT_WHITE);
-                        tft.fillRect(1,basey+81,baz,18,TFT_BLUE);
-                    } else {
-                        tft.setTextColor(TFT_RED,TFT_BLACK);
-                        tft.drawString("\x27",int(TFTW/2),basey+32); // 0x27 is big Ø symbol in the bigfont                      
-                    }
-                    tft.unloadFont();
-                }
-                // flame thermocouple
-                if ((mfdata[2] == 0x13 && mfdata[3] == 0x1A) || tagtype[screentag] == TAG_FLAME) {
-                    // get the temperature
-                    foo = (((unsigned short)mfdata[5] << 8) + (unsigned short)mfdata[4]) >> 2;
-                    tft.loadFont(bigfont);
-                    if (foo > flame_threshold) {
-                        tft.setTextColor(TFT_SKYBLUE,TFT_BLACK);
-                        tft.drawString("\x3b",int(TFTW/2),basey+32); // 0x3b = flame symbol in the bigfont
-                    } else {
-                        tft.setTextColor(TFT_RED,TFT_BLACK);
-                        tft.drawString("\x26",int(TFTW/2),basey+32); // 0x27 is Ø symbol in the bigfont
-                    }
-                    tft.unloadFont();
-                    tft.loadFont(tinyfont);
-                    tft.setTextColor(TFT_WHITE,TFT_BLACK);
-                    sprintf(displaytxt,"%d\xb0",foo);  // 0xb0 is degree sign in standard ascii
-                    tft.drawString(displaytxt,int(TFTW/2),basey+80);
-                    tft.unloadFont();
-                }
-                // energy meter pulse counter
-                if ((mfdata[2] == 0xDC && mfdata[3] == 0xAC) || tagtype[screentag] == TAG_ENERGY) {
-                    tft.loadFont(bigfont);
-                    tft.setTextColor(TFT_SKYBLUE,TFT_BLACK);
-                    wh = (((uint32_t)mfdata[11] << 24) + ((uint32_t)mfdata[10] << 16) + ((uint32_t)mfdata[9] << 8) + (uint32_t)mfdata[8]);
-
+            // Other tags --------------------------------------------------------------------------------------
+            // water gauge
+            if (tagtype[screentag] == TAG_WATER) {
+                tft.loadFont(bigfont);
+                if (tank_volume > 0) {
+                    // This is liters. If you are retarded and use gallons or buckets (pronounced bouquet) for measuring liquid volume, make your own glyph.
                     if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
-                        tft.setTextColor(TFT_RED,TFT_BLACK);
-                        tft.drawString("\x26",int(TFTW/2),basey+36);
+                        tft.drawString("??\x28",int(TFTW/2),basey+32); // 0x28 = liter symbol "script small L" in the bigfont
                     } else {
-                        sprintf(displaytxt,"%.1f \x3d",wh*0.001); // 0x3D = kWh symbol
-                        tft.drawString(displaytxt,int(TFTW/2), basey+36);
+                        sprintf(displaytxt,"%d\x28",(unsigned int)tagdata[screentag][10]);
+                        tft.drawString(displaytxt,int(TFTW/2),basey+32);
                     }
-                    tft.unloadFont();
-
-                    tft.loadFont(tinyfont);
-                    tft.setTextColor(TFT_WHITE,TFT_BLACK);
-                    wh = (((uint32_t)mfdata[7] << 24) + ((uint32_t)mfdata[6] << 16) + ((uint32_t)mfdata[5] << 8) + (uint32_t)mfdata[4]);
-                    sprintf(displaytxt,"\u03a3 %07.1f",wh*0.001);      // 0x03A3 is capital sigma meaning total sum
-                    tft.drawString(displaytxt,int(TFTW/2),basey+80);
-                    tft.unloadFont();
+                    int baz = TFTW * (unsigned int)tagdata[screentag][10] / tank_volume -2;
+                    tft.drawRect(0,basey+80,TFTW,20,TFT_WHITE);
+                    tft.fillRect(1,basey+81,baz,18,TFT_BLUE);
+                } else {
+                    tft.setTextColor(TFT_RED,TFT_BLACK);
+                    tft.drawString("\x27",int(TFTW/2),basey+32); // 0x27 is big Ø symbol in the bigfont                      
                 }
+                tft.unloadFont();
             }
-            // Xiaomi Mijia thermometer with atc1441 custom firmware
-            // there is tag name beginning with ATC_ in payload offset 19
-            if (strncmp(mfdata+19,"ATC_",4) == 0 || tagtype[screentag] == TAG_MIJIA) {
+            // flame thermocouple
+            if (tagtype[screentag] == TAG_FLAME) {
+                // get the temperature
+                foo = (((unsigned short)tagdata[screentag][10] << 8) + (unsigned short)tagdata[screentag][9]) >> 2;
+                tft.loadFont(bigfont);
+                if (foo > flame_threshold) {
+                    tft.setTextColor(TFT_SKYBLUE,TFT_BLACK);
+                    tft.drawString("\x3b",int(TFTW/2),basey+32); // 0x3b = flame symbol in the bigfont
+                } else {
+                    tft.setTextColor(TFT_RED,TFT_BLACK);
+                    tft.drawString("\x26",int(TFTW/2),basey+32); // 0x27 is Ø symbol in the bigfont
+                }
+                tft.unloadFont();
+                tft.loadFont(tinyfont);
+                tft.setTextColor(TFT_WHITE,TFT_BLACK);
+                sprintf(displaytxt,"%d\xb0",foo);  // 0xb0 is degree sign in standard ascii
+                tft.drawString(displaytxt,int(TFTW/2),basey+80);
+                tft.unloadFont();
+            }
+            // energy meter pulse counter
+            if (tagtype[screentag] == TAG_ENERGY) {
+                tft.loadFont(bigfont);
+                tft.setTextColor(TFT_SKYBLUE,TFT_BLACK);
+                wh = (((uint32_t)tagdata[screentag][16] << 24) + ((uint32_t)tagdata[screentag][15] << 16) 
+                      + ((uint32_t)tagdata[screentag][14] << 8) + (uint32_t)tagdata[screentag][13]);
+
+                if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
+                    tft.setTextColor(TFT_RED,TFT_BLACK);
+                    tft.drawString("\x26",int(TFTW/2),basey+36);
+                } else {
+                    sprintf(displaytxt,"%.1f \x3d",wh*0.001); // 0x3D = kWh symbol
+                    tft.drawString(displaytxt,int(TFTW/2), basey+36);
+                }
+                tft.unloadFont();
+
+                tft.loadFont(tinyfont);
+                tft.setTextColor(TFT_WHITE,TFT_BLACK);
+                wh = (((uint32_t)tagdata[screentag][12] << 24) + ((uint32_t)tagdata[screentag][11] << 16) 
+                      + ((uint32_t)tagdata[screentag][10] << 8) + (uint32_t)tagdata[screentag][9]);
+                      
+                sprintf(displaytxt,"\u03a3 %07.1f",wh*0.001);      // 0x03A3 is capital sigma meaning total sum
+                tft.drawString(displaytxt,int(TFTW/2),basey+80);
+                tft.unloadFont();
+            }
+            // Xiaomi Mijia thermometer with ATC_MiThermometer custom firmware by atc1441
+            if (tagtype[screentag] == TAG_MIJIA) {
                 tft.loadFont(bigfont);
                 
                 if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
@@ -562,7 +556,7 @@ void screen_task(void * param) {
                     tft.drawString(displaytxt,int(TFTW/2),basey+32);
                     tft.unloadFont();    
                 } else {
-                    temperature = ((short)mfdata[10]<<8) | (unsigned short)mfdata[11];
+                    temperature = ((short)tagdata[screentag][10]<<8) | (unsigned short)tagdata[screentag][11];
                                   
                     sprintf(displaytxt,"%.1f\x29",temperature*0.1); // 0x29 = degree sign in the bigfont
 
@@ -576,8 +570,8 @@ void screen_task(void * param) {
                     tft.unloadFont();
                     tft.setTextColor(TFT_WHITE,TFT_BLACK);
                 
-                    humidity = (unsigned short)mfdata[12];
-                    voltage = ((short)mfdata[14]<<8) | (unsigned short)mfdata[15];
+                    humidity = (unsigned short)tagdata[screentag][12];
+                    voltage = ((short)tagdata[screentag][14]<<8) | (unsigned short)tagdata[screentag][15];
                     sprintf(displaytxt,"RH %.0f%%   %.2f V",(float)humidity, voltage/1000);
                 
                     tft.loadFont(tinyfont);
@@ -654,7 +648,7 @@ void startPortal() {
     for (uint8_t i = 0; i < MAX_TAGS; i++) {
         memset(heardtags[i],0,sizeof(heardtags[i]));
     }
-    Serial.print("\nListening 10 seconds for new tags...\n");
+    Serial.print("\nListening 11 seconds for new tags...\n");
 
     // First listen 11 seconds to find new tags.
     blescan->setAdvertisedDeviceCallbacks(new ScannedDeviceCallbacks());
@@ -706,11 +700,11 @@ void startPortal() {
 void httpRoot() {
     portal_timer = millis();
     String html;
-    
+
     file = SPIFFS.open("/index.html", "r");
     html = file.readString();
-    file.close();    
-    
+    file.close();
+
     server.send(200, "text/html; charset=UTF-8", html);
 }
 
@@ -718,40 +712,68 @@ void httpRoot() {
 
 void httpSensors() {
     String html;
-    char tablerows[2048];
-    char rowbuf[256];
+    String tablerows; //char tablerows[16384];
+    char rowbuf[1024];
     int counter = 0;
-    
+
     portal_timer = millis();
-    memset(tablerows, '\0', sizeof(tablerows));
-    
+//    memset(tablerows, 0, 16383);
+
     file = SPIFFS.open("/sensors.html", "r");
     html = file.readString();
     file.close();
 
     loadSavedTags();
-    
+
     for(int i = 0 ; i < MAX_TAGS; i++) {
         if (strlen(tagmac[i]) == 0) continue;
-        
-        sprintf(rowbuf,"<tr><td>%s<br /><input type=\"text\" name=\"sname%d\" maxlength=\"24\" value=\"%s\">",
-                       tagmac[i],counter,tagname[i]);
-        strcat(tablerows,rowbuf);                       
-        sprintf(rowbuf,"<input type=\"hidden\" name=\"saddr%d\" value=\"%s\"></td></tr>",counter,tagmac[i]);
-        strcat(tablerows,rowbuf);
+
+        sprintf(rowbuf,"<tr><td colspan=\"2\" id=\"mac%d\">%s</td></tr><tr>\n",
+                       counter,tagmac[i]);
+//        strcat(tablerows,rowbuf);
+        tablerows += String(rowbuf);
+        sprintf(rowbuf,"<tr><td><input type=\"text\" id=\"sname%d\" name=\"sname%d\" maxlength=\"24\" value=\"%s\">",
+                       counter,counter,tagname[i]);
+//        strcat(tablerows,rowbuf);
+        tablerows += String(rowbuf);
+        sprintf(rowbuf,"<input type=\"hidden\" id=\"saddr%d\" name=\"saddr%d\" value=\"%s\">",counter,counter,tagmac[i]);
+//        strcat(tablerows,rowbuf);
+        tablerows += String(rowbuf);
+        if (counter > 0) {
+            sprintf(rowbuf,"<td><a onclick=\"moveup(%d)\">\u2191</a></td></tr>\n",counter);
+            tablerows += String(rowbuf);
+//            strcat(tablerows,rowbuf);
+        } else {
+//            strcat(tablerows,"<td></td></tr>\n");
+        tablerows += "<td></td></tr>\n";
+
+        }
         counter++;
     }
     if (strlen(heardtags[0]) != 0 && counter < MAX_TAGS) {
         for(int i = 0; i < MAX_TAGS; i++) {
             if (strlen(heardtags[i]) == 0) continue;
             if (getTagIndex(heardtags[i]) != 0xFF) continue;
-            
-            sprintf(rowbuf,"<tr><td>%s<br /><input type=\"text\" name=\"sname%d\" maxlength=\"24\">",
-                    heardtags[i],counter);
-            strcat(tablerows,rowbuf);
-            sprintf(rowbuf,"<input type=\"hidden\" name=\"saddr%d\" value=\"%s\"></td></tr>",
-                           counter,heardtags[i]);
-            strcat(tablerows,rowbuf);
+
+            sprintf(rowbuf,"<tr><td colspan=\"2\" id=\"mac%d\">%s &nbsp; %s</td></tr>\n",
+                    counter,heardtags[i],type_name[heardtagtype[i]]);
+//            strcat(tablerows,rowbuf);
+            tablerows += String(rowbuf);
+            sprintf(rowbuf,"<tr><td><input type=\"text\" id=\"sname%d\" name=\"sname%d\" maxlength=\"24\">",counter,counter);
+//            strcat(tablerows,rowbuf);
+            tablerows += String(rowbuf);
+            sprintf(rowbuf,"<input type=\"hidden\" id=\"saddr%d\" name=\"saddr%d\" value=\"%s\">",
+                           counter,counter,heardtags[i]);
+            tablerows += String(rowbuf);
+//            strcat(tablerows,rowbuf);
+            if (counter > 0) {
+                sprintf(rowbuf,"<td><a onclick=\"moveup(%d)\">\u2191</a></td></tr>\n",counter);
+                tablerows += String(rowbuf);
+//                strcat(tablerows,rowbuf);
+            } else {
+//                strcat(tablerows,"<td></td></tr>\n");
+                tablerows += "<td></td></tr>\n";
+            }
             counter++;
             if (counter > MAX_TAGS) break;
         }
@@ -759,7 +781,7 @@ void httpSensors() {
 
     html.replace("###TABLEROWS###", tablerows);
     html.replace("###COUNTER###", String(counter));
-            
+
     server.send(200, "text/html; charset=UTF-8", html);
 }
 /* ------------------------------------------------------------------------------- */
