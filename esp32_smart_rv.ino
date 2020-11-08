@@ -294,7 +294,7 @@ void setup() {
         
     Serial.begin(115200);
     Serial.println("\n\nESP32 Smart RV by OH2MP 2020");
-    //fce2();
+    fce2();
 
     SPIFFS.begin();
     loadSavedTags();
@@ -717,7 +717,6 @@ void httpSensors() {
     int counter = 0;
 
     portal_timer = millis();
-//    memset(tablerows, 0, 16383);
 
     file = SPIFFS.open("/sensors.html", "r");
     html = file.readString();
@@ -730,23 +729,17 @@ void httpSensors() {
 
         sprintf(rowbuf,"<tr><td colspan=\"2\" id=\"mac%d\">%s</td></tr><tr>\n",
                        counter,tagmac[i]);
-//        strcat(tablerows,rowbuf);
         tablerows += String(rowbuf);
         sprintf(rowbuf,"<tr><td><input type=\"text\" id=\"sname%d\" name=\"sname%d\" maxlength=\"24\" value=\"%s\">",
                        counter,counter,tagname[i]);
-//        strcat(tablerows,rowbuf);
         tablerows += String(rowbuf);
         sprintf(rowbuf,"<input type=\"hidden\" id=\"saddr%d\" name=\"saddr%d\" value=\"%s\">",counter,counter,tagmac[i]);
-//        strcat(tablerows,rowbuf);
         tablerows += String(rowbuf);
         if (counter > 0) {
             sprintf(rowbuf,"<td><a onclick=\"moveup(%d)\">\u2191</a></td></tr>\n",counter);
             tablerows += String(rowbuf);
-//            strcat(tablerows,rowbuf);
         } else {
-//            strcat(tablerows,"<td></td></tr>\n");
-        tablerows += "<td></td></tr>\n";
-
+            tablerows += "<td></td></tr>\n";
         }
         counter++;
     }
@@ -757,21 +750,16 @@ void httpSensors() {
 
             sprintf(rowbuf,"<tr><td colspan=\"2\" id=\"mac%d\">%s &nbsp; %s</td></tr>\n",
                     counter,heardtags[i],type_name[heardtagtype[i]]);
-//            strcat(tablerows,rowbuf);
             tablerows += String(rowbuf);
             sprintf(rowbuf,"<tr><td><input type=\"text\" id=\"sname%d\" name=\"sname%d\" maxlength=\"24\">",counter,counter);
-//            strcat(tablerows,rowbuf);
             tablerows += String(rowbuf);
             sprintf(rowbuf,"<input type=\"hidden\" id=\"saddr%d\" name=\"saddr%d\" value=\"%s\">",
                            counter,counter,heardtags[i]);
             tablerows += String(rowbuf);
-//            strcat(tablerows,rowbuf);
             if (counter > 0) {
                 sprintf(rowbuf,"<td><a onclick=\"moveup(%d)\">\u2191</a></td></tr>\n",counter);
                 tablerows += String(rowbuf);
-//                strcat(tablerows,rowbuf);
             } else {
-//                strcat(tablerows,"<td></td></tr>\n");
                 tablerows += "<td></td></tr>\n";
             }
             counter++;
