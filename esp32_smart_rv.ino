@@ -361,7 +361,7 @@ void loop() {
             Serial.printf("============= end scan\n");
         }
 
-        // For make sure if button release is not detected
+        // For make sure if button release is not detected. It sometimes happen.
         if (digitalRead(BUTTON) == HIGH && buttonstate == LOW) {
             buttonstate = HIGH;
             request_timer = 0;
