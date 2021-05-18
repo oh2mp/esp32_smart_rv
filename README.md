@@ -26,6 +26,7 @@ Other beacons that are supported are:
 - [ESP32 Water sensor](https://github.com/oh2mp/esp32_watersensor)
 - [ESP32 Energy meter](https://github.com/oh2mp/esp32_energymeter)
 - [ESP32 MAX6675 beacon for thermocouples for gas fridge](https://github.com/oh2mp/esp32_max6675_beacon)
+- [ESP32 DS18x20 beacon](https://github.com/oh2mp/esp32_ds1820_ble)
 
 Don't worry about that the sensor names in these example photos are in Finnish. They are fully configurable via
 portal mode that is in English.
