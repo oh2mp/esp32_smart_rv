@@ -38,7 +38,7 @@ TFT_eSPI tft = TFT_eSPI();
 #define TAG_FLAME  5
 #define TAG_DS1820 6
 
-const char type_name[6][8] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame"};
+const char type_name[7][8] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame", "DS18x20"};
 // end of tag type enumerations and names
 
 char tagdata[MAX_TAGS][32];      // space for raw tag data unparsed
