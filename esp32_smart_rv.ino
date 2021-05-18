@@ -36,6 +36,7 @@ TFT_eSPI tft = TFT_eSPI();
 #define TAG_ENERGY 3
 #define TAG_WATER  4
 #define TAG_FLAME  5
+#define TAG_DS1820 6
 
 const char type_name[6][8] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame"};
 // end of tag type enumerations and names
@@ -105,7 +106,8 @@ uint8_t getTagIndex(const char *mac) {
      The sketches are identified by next two bytes after MFID.
      0xE948 water tank gauge https://github.com/oh2mp/esp32_watersensor/
      0x1A13 thermocouple sensor for gas flame https://github.com/oh2mp/esp32_max6675_beacon/
-     0xACDC energy meter pulse counter
+     0xACDC energy meter pulse counter https://github.com/oh2mp/esp32_energymeter
+     0x1820 ds1820 beacon https://github.com/oh2mp/esp32_ds1820_ble
 
     Xiaomi Mijia thermometer with atc1441 custom firmware.
      https://github.com/atc1441/ATC_MiThermometer
@@ -119,6 +121,7 @@ uint8_t tagTypeFromPayload(const uint8_t *payload, const uint8_t *mac) {
         if (memcmp(payload + 5, "\xE5\x02\xDC\xAC", 4) == 0)  return TAG_ENERGY;
         if (memcmp(payload + 5, "\xE5\x02\x48\xE9", 4) == 0)  return TAG_WATER;
         if (memcmp(payload + 5, "\xE5\x02\x13\x1A", 4) == 0)  return TAG_FLAME;
+        if (memcmp(payload + 5, "\xE5\x02\x20\x18", 4) == 0)  return TAG_DS1820;
     }
     // ATC_MiThermometer? The data should contain 10161a18 in the beginning and mac at offset 4.
     if (memcmp(payload, "\x10\x16\x1A\x18", 4) == 0 && memcmp(mac, payload + 4, 6) == 0) return TAG_MIJIA;
@@ -358,6 +361,11 @@ void loop() {
             Serial.printf("============= end scan\n");
         }
 
+        // For make sure if button release is not detected
+        if (digitalRead(BUTTON) == HIGH && buttonstate == LOW) {
+            buttonstate = HIGH;
+            request_timer = 0;
+        }
         // if the button has been pressed for 5 seconds, start portal
         if (request_timer > 0 && millis() - request_timer > 5000) {
             startPortal();
@@ -577,6 +585,33 @@ void screen_task(void * param) {
                     tft.fillRect(TFTW - 21, basey + 50, 4, 12, TFT_LOGOCOLOR);
                     tft.fillRect(TFTW - 13, basey + 48, 4, 14, TFT_LOGOCOLOR);
                     tft.fillRect(TFTW - 5, basey + 42, 4, 20, TFT_LOGOCOLOR);
+                }
+            }
+            // ds1820 beacon
+            if (tagtype[screentag] == TAG_DS1820) {
+                tft.loadFont(bigfont);
+                if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
+                    sprintf(displaytxt, "\x26"); // 0x26 = warning triangle sign in the bigfont
+                    tft.setTextColor(TFT_RED, TFT_BLACK);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 32);
+                    tft.unloadFont();
+                } else {
+                    temperature = ((short)tagdata[screentag][10] << 8) | (unsigned short)tagdata[screentag][9];
+                    sprintf(displaytxt, "%.1f\x29", temperature * 0.1); // 0x29 = degree sign in the bigfont
+
+                    int colinx = int(temperature * 0.1 + 20);
+                    if (colinx < 0) {
+                        colinx = 0;
+                    }
+                    if (colinx > 55) {
+                        colinx = 55;
+                    }
+                    tft.setTextColor(tempcolors[colinx], TFT_BLACK);
+
+                    tft.loadFont(bigfont);
+                    // there's no extra txt line with this type of beacon, we can draw temperature 8pix lower
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 40);
+                    tft.unloadFont();
                 }
             }
 
