@@ -65,7 +65,9 @@ from the display driver chip in this project.
 
 In the main program code there are defines for push button and backlight LED. 
 Connect a button between the pin and ground and connect the LED pin to the display's BL pin.
-Short press increases the lightness of the screen and long press switches the unit to the portal mode.
+Short press increases the lightness of the screen and long press (5s) switches the unit to the portal mode.
+HINT: An automatic brightness is also possible by putting an LDR between the LED pin and display's BL pin.
+Then the brightness setting acts as the maximum brightness.
 
 ```c
 #define BUTTON 12                // push button for lightness and long press starts portal
@@ -133,13 +135,15 @@ e3:28:8c:99:47:ae	bar
 
 ### misc.txt
 
-Only two rows: First row contains the flame threshold and the second row the tank volume. Lines ended by newline.
+Only three rows: First row contains the flame threshold, second row the tank volume (liters) and third row the brightness. 
+Lines ended by newline.
 
 **Example misc.txt file:**
 
 ```
 50
 110
+6
 ```
 
 ------

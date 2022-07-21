@@ -22,13 +22,13 @@ TFT_eSPI tft = TFT_eSPI();
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
 
-#define BUTTON 12                // push button for lightness and long press starts portal
+#define BUTTON 13                // push button for lightness and long press starts portal
 #define APTIMEOUT 120000         // Portal timeout. Reboot after ms if no activity.
 
 #define MAX_TAGS 12
 #define BLLED 19                 // backlight led
 #define TFT_LOGOCOLOR 0x3186     // rgb565 for #333333
-//   nice onverter: http://www.rinkydinkelectronics.com/calc_rgb565.php
+//   nice converter: http://www.rinkydinkelectronics.com/calc_rgb565.php
 
 // Tag type enumerations and names
 #define TAG_RUUVI  1
@@ -62,7 +62,7 @@ volatile uint8_t buttonstate = 1;
 volatile uint8_t oldbuttonstate = 1;
 volatile uint32_t debounce = 0;
 
-portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 WebServer server(80);
 IPAddress apIP(192, 168, 4, 1);                  // portal ip address
@@ -71,6 +71,7 @@ const char my_ssid[] PROGMEM = "ESP32 Smart RV"; // AP SSID
 uint32_t portal_timer = 0;
 uint32_t request_timer = 0;
 uint32_t last_bri = 0;
+uint32_t brightness_changed = 0;
 
 char heardtags[MAX_TAGS][18];
 uint8_t heardtagtype[MAX_TAGS];
@@ -277,6 +278,7 @@ void button_task( void * parameter) {
                 Serial.printf("brightness: %d\n", brightness);
                 ledcWrite(0, brightness * 12 + 8);
                 last_bri = millis();
+                brightness_changed = millis();
                 tft.fillRect(0, 0, TFTW, TFTH / 3 - 6, TFT_WHITE);
                 tft.setTextDatum(TC_DATUM);
                 tft.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -303,7 +305,7 @@ void setup() {
     ledcWrite(0, 128);
 
     Serial.begin(115200);
-    Serial.println("\n\nESP32 Smart RV by OH2MP 2020");
+    Serial.println("\n\nESP32 Smart RV by OH2MP 2020-2022");
 
     SPIFFS.begin();
     loadSavedTags();
@@ -318,6 +320,10 @@ void setup() {
         file.readBytesUntil('\n', miscread, 8);
         tank_volume = atoi(miscread);
         Serial.printf("Tank volume %d\n", tank_volume);
+        memset(miscread, '\0', sizeof(miscread));
+        file.readBytesUntil('\n', miscread, 8);
+        if (strlen(miscread) > 0) brightness = atoi(miscread);
+        Serial.printf("Brightness %d\n", brightness);
         file.close();
     } else {
         fce2();
@@ -366,9 +372,20 @@ void loop() {
             buttonstate = HIGH;
             request_timer = 0;
         }
-        // if the button has been pressed for 5 seconds, start portal
-        if (request_timer > 0 && millis() - request_timer > 5000) {
+        // If the button has been pressed for 5 seconds, start portal. Be sure that button is really down.
+        if (request_timer > 0 && millis() - request_timer > 5000 && digitalRead(BUTTON) == LOW) {
             startPortal();
+        }
+        // If brightness has changed over a minute ago, save the value. 
+        // This is a way to reduce SPIFFS writes when we don't save it on every button push.
+        if (brightness_changed != 0) {
+            if (millis() - brightness_changed > 60000) {
+                brightness_changed = 0;
+                file = SPIFFS.open("/misc.txt", "w");
+                file.printf("%d\n%d\n%d\n", flame_threshold, tank_volume, brightness);
+                file.close();
+                Serial.println("Brightness has changed. misc.txt saved.");
+            }
         }
 
     } else {
@@ -665,6 +682,7 @@ void startPortal() {
     detachInterrupt(digitalPinToInterrupt(BUTTON));
     portEXIT_CRITICAL_ISR(&mux);
 
+    // In portal mode force the backlight to be bright.
     ledcWrite(0, 128);
 
     tft.fillScreen(TFT_BLACK);
@@ -864,6 +882,7 @@ void httpSaveMisc() {
     file = SPIFFS.open("/misc.txt", "w");
     file.printf("%s\n", server.arg("thr").c_str());
     file.printf("%s\n", server.arg("tankvol").c_str());
+    file.printf("%d\n", brightness);
     file.close();
 
     // reread
@@ -874,6 +893,10 @@ void httpSaveMisc() {
     memset(miscread, '\0', sizeof(miscread));
     file.readBytesUntil('\n', miscread, 8);
     tank_volume = atoi(miscread);
+    memset(miscread, '\0', sizeof(miscread));
+    file.readBytesUntil('\n', miscread, 8);
+    brightness = atoi(miscread);
+    memset(miscread, '\0', sizeof(miscread));
     file.close();
 
     file = SPIFFS.open("/ok.html", "r");
