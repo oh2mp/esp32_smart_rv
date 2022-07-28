@@ -31,14 +31,18 @@ TFT_eSPI tft = TFT_eSPI();
 //   nice converter: http://www.rinkydinkelectronics.com/calc_rgb565.php
 
 // Tag type enumerations and names
-#define TAG_RUUVI  1
-#define TAG_MIJIA  2
-#define TAG_ENERGY 3
-#define TAG_WATER  4
-#define TAG_FLAME  5
-#define TAG_DS1820 6
+#define TAG_RUUVI   1
+#define TAG_MIJIA   2
+#define TAG_ENERGY  3
+#define TAG_WATER   4
+#define TAG_FLAME   5
+#define TAG_DS1820  6
+#define TAG_DHT     7
+#define TAG_WATTSON 8
+#define TAG_MOPEKA  9
 
-const char type_name[7][8] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame", "DS18x20"};
+const char type_name[10][10] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame", "DS18x20", "DHTxx", "Wattson", "Mopeka\u2713"};
+
 // end of tag type enumerations and names
 
 char tagdata[MAX_TAGS][32];      // space for raw tag data unparsed
@@ -87,6 +91,12 @@ const uint16_t tempcolors[] PROGMEM = {
     0xFA20, 0xF9C0, 0xF980, 0xF920, 0xF8E0, 0xF880, 0xF840, 0xF800
 };
 
+// Mopeka definitions. Default values are valid for 11 kg gas bottles in Nordic and Baltic countries
+
+int mopeka_cm[2] = { 35, 35 };
+int mopeka_kg[2] = { 11, 11 };
+int mopeka_unit = 0;             // 0 = cm, 1 = kg, 3 = %
+
 /* ------------------------------------------------------------------------------- */
 /* Get known tag index from MAC address. Format: 12:34:56:78:9a:bc */
 uint8_t getTagIndex(const char *mac) {
@@ -113,6 +123,10 @@ uint8_t getTagIndex(const char *mac) {
     Xiaomi Mijia thermometer with atc1441 custom firmware.
      https://github.com/atc1441/ATC_MiThermometer
 
+    Mopeka✓ Gas tank level beacon
+     https://www.mopeka.com/product-category/sensor/
+
+
 */
 
 uint8_t tagTypeFromPayload(const uint8_t *payload, const uint8_t *mac) {
@@ -126,6 +140,9 @@ uint8_t tagTypeFromPayload(const uint8_t *payload, const uint8_t *mac) {
     }
     // ATC_MiThermometer? The data should contain 10161a18 in the beginning and mac at offset 4.
     if (memcmp(payload, "\x10\x16\x1A\x18", 4) == 0 && memcmp(mac, payload + 4, 6) == 0) return TAG_MIJIA;
+    // Mopeka gas tank sensor?
+    if (memcmp(payload, "\x1A\xFF\x0D\x00", 4) == 0 && payload[26] == mac[5]) return TAG_MOPEKA;
+    Serial.printf("%X %X\n", mac[5], payload[26]);
 
     return 0xFF; // unknown
 }
@@ -185,6 +202,7 @@ class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
             /*  we are interested only about Ruuvi tags (Manufacturer ID 0x0499)
                 and self made tags that have Espressif ID 0x02E5
                 and Xiaomi Mijia thermometer with atc1441 custom firmware
+                and Mopeka✓ gas tank sensors
             */
             uint8_t mac[6];
             memcpy(mac, advDev.getAddress().getNative(), 6);
@@ -327,13 +345,31 @@ void setup() {
         file.close();
     } else {
         fce2();
-        BLEDevice::init("");
-        blescan = BLEDevice::getScan();
-        startPortal(); // no settings were found, so start the portal without button
     }
-
+    if (SPIFFS.exists("/mopeka.txt")) {
+        file = SPIFFS.open("/mopeka.txt", "r");
+        memset(miscread, '\0', sizeof(miscread));
+        file.readBytesUntil('\n', miscread, 8);
+        mopeka_cm[0] = atoi(miscread);
+        memset(miscread, '\0', sizeof(miscread));
+        file.readBytesUntil('\n', miscread, 8);
+        mopeka_kg[0] = atoi(miscread);
+        memset(miscread, '\0', sizeof(miscread));
+        file.readBytesUntil('\n', miscread, 8);
+        mopeka_cm[1] = atoi(miscread);
+        memset(miscread, '\0', sizeof(miscread));
+        file.readBytesUntil('\n', miscread, 8);
+        mopeka_kg[1] = atoi(miscread);
+        memset(miscread, '\0', sizeof(miscread));
+        file.readBytesUntil('\n', miscread, 8);
+        mopeka_unit = atoi(miscread);
+        memset(miscread, '\0', sizeof(miscread));
+        file.close();
+    }
+    
     BLEDevice::init("");
     blescan = BLEDevice::getScan();
+
     blescan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
     blescan->setActiveScan(true);
     blescan->setInterval(100);
@@ -376,7 +412,7 @@ void loop() {
         if (request_timer > 0 && millis() - request_timer > 5000 && digitalRead(BUTTON) == LOW) {
             startPortal();
         }
-        // If brightness has changed over a minute ago, save the value. 
+        // If brightness has changed over a minute ago, save the value.
         // This is a way to reduce SPIFFS writes when we don't save it on every button push.
         if (brightness_changed != 0) {
             if (millis() - brightness_changed > 60000) {
@@ -416,6 +452,7 @@ void screen_task(void * param) {
     float voltage;
     uint32_t wh;
     int basey = 0;
+    uint8_t mopeka_id = 0;
 
     while (1) {
         yield();
@@ -631,6 +668,75 @@ void screen_task(void * param) {
                     tft.unloadFont();
                 }
             }
+            // Mopeka✓ gas tank sensor
+            if (tagtype[screentag] == TAG_MOPEKA) {
+                tft.loadFont(bigfont);
+                if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
+                    sprintf(displaytxt, "\x26"); // 0x26 = warning triangle sign in the bigfont
+                    tft.setTextColor(TFT_RED, TFT_BLACK);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 32);
+                    tft.unloadFont();
+                } else {
+                    float displevel = 0;
+                    uint8_t unitpixels = 0;    // midfont "%" width is 25px, "kg" is 30px and "cm" is 38px;
+                    char unitstr[3] = "\0\0";
+                    // This algorithm has been got from Mopeka Products, LLC.
+                    uint8_t level = 0x35;
+                    for (uint8_t i = 8; i < 27; i++) {
+                        level ^= tagdata[screentag][i];
+                    }
+                    
+                    displevel = level*.762; // convert raw level to cm
+                    if (displevel < 0) displevel = 0;
+                    if (displevel > mopeka_cm[mopeka_id]) displevel = mopeka_cm[mopeka_id];
+                    tft.setTextColor(TFT_SKYBLUE, TFT_BLACK);
+                    if (displevel / mopeka_cm[mopeka_id] < 0.2) tft.setTextColor(TFT_YELLOW, TFT_BLACK); 
+                    if (displevel / mopeka_cm[mopeka_id] < 0.1) tft.setTextColor(TFT_RED, TFT_BLACK); 
+                    
+                    switch (mopeka_unit) {
+                        case 0:
+                            sprintf(displaytxt, "\x3c  %d", int(displevel));     // \x3c is gas bottle symbol
+                            unitpixels = 38;
+                            strcpy(unitstr, "cm");
+                            break;
+                        case 1:
+                            displevel = displevel / mopeka_cm[mopeka_id] * mopeka_kg[mopeka_id];
+                            sprintf(displaytxt, "\x3c  %.1f", displevel);
+                            unitpixels = 30;
+                            strcpy(unitstr, "kg");
+                            break;
+                        case 2:
+                            displevel = displevel / mopeka_cm[mopeka_id] * 100;
+                            if (displevel > 100) displevel = 100;
+                            sprintf(displaytxt, "\x3c  %d", int(displevel));
+                            unitpixels = 25;
+                            strcpy(unitstr, "%");
+                            break;
+                    }
+                                        
+                    uint16_t txtwidth = tft.drawString(displaytxt, int(TFTW / 2), -50);
+                    uint16_t txtleft = int((TFTW - txtwidth - unitpixels - 4 ) / 2);
+                    tft.setTextDatum(TL_DATUM);
+                    tft.drawString(displaytxt, txtleft, basey + 32);
+                    tft.unloadFont();
+
+                    // draw unit with smaller font, midfont
+                    tft.loadFont(midfont);
+                    tft.drawString(unitstr, txtleft + txtwidth +4, basey + 46);
+                    tft.unloadFont();
+
+                    tft.setTextDatum(TC_DATUM);
+                    voltage = ((short)tagdata[screentag][6] >> 7) + 1.5;
+                    sprintf(displaytxt, "%.2f V", voltage);
+
+                    tft.loadFont(tinyfont);
+                    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 80);
+                    tft.unloadFont();
+                }
+                mopeka_id++;
+                if (mopeka_id > 1) mopeka_id = 0;
+            }
 
             if (basey < TFTH / 2) {
                 tft.drawLine(0, basey + TFTH / 3 - 6, TFTW - 1, basey + TFTH / 3 - 6, TFT_LIGHTGREY);
@@ -734,6 +840,8 @@ void startPortal() {
     server.on("/style.css", httpStyle);
     server.on("/misc.html", httpMisc);
     server.on("/savemisc", httpSaveMisc);
+    server.on("/mopeka.html", httpMopeka);
+    server.on("/savemopeka", httpSaveMopeka);
     server.on("/sensors.html", httpSensors);
     server.on("/savesens", httpSaveSensors);
     server.on("/boot", httpBoot);
@@ -875,6 +983,40 @@ void httpMisc() {
     server.send(200, "text/html; charset=UTF-8", html);
 }
 /* ------------------------------------------------------------------------------- */
+
+void httpMopeka() {
+    portal_timer = millis();
+    String html;
+
+    file = SPIFFS.open("/mopeka.html", "r");
+    html = file.readString();
+    file.close();
+
+    html.replace("###CM0###", String(mopeka_cm[0]));
+    html.replace("###CM1###", String(mopeka_cm[1]));
+    html.replace("###KG0###", String(mopeka_kg[0]));
+    html.replace("###KG1###", String(mopeka_kg[1]));
+    switch (mopeka_unit) {
+        case 0:
+            html.replace("###CHKCM###", "checked");
+            html.replace("###CHKKG###", "");
+            html.replace("###CHKPC###", "");
+            break;
+        case 1:
+            html.replace("###CHKKG###", "checked");
+            html.replace("###CHKCM###", "");
+            html.replace("###CHKPC###", "");
+            break;
+        case 2:
+            html.replace("###CHKPC###", "checked");
+            html.replace("###CHKCM###", "");
+            html.replace("###CHKKG###", "");
+            break;
+    }
+
+    server.send(200, "text/html; charset=UTF-8", html);
+}
+/* ------------------------------------------------------------------------------- */
 void httpSaveMisc() {
     portal_timer = millis();
     String html;
@@ -906,6 +1048,49 @@ void httpSaveMisc() {
     server.sendHeader("Refresh", "2;url=/");
     server.send(200, "text/html; charset=UTF-8", html);
 }
+
+/* ------------------------------------------------------------------------------- */
+void httpSaveMopeka() {
+    portal_timer = millis();
+    String html;
+
+    file = SPIFFS.open("/mopeka.txt", "w");
+    file.printf("%s\n", server.arg("cm0").c_str());
+    file.printf("%s\n", server.arg("kg0").c_str());
+    file.printf("%s\n", server.arg("cm1").c_str());
+    file.printf("%s\n", server.arg("kg1").c_str());
+    file.printf("%s\n", server.arg("unit").c_str());
+    file.close();
+
+    // reread
+    file = SPIFFS.open("/mopeka.txt", "r");
+    memset(miscread, '\0', sizeof(miscread));
+    file.readBytesUntil('\n', miscread, 8);
+    mopeka_cm[0] = atoi(miscread);
+    memset(miscread, '\0', sizeof(miscread));
+    file.readBytesUntil('\n', miscread, 8);
+    mopeka_kg[0] = atoi(miscread);
+    memset(miscread, '\0', sizeof(miscread));
+    file.readBytesUntil('\n', miscread, 8);
+    mopeka_cm[1] = atoi(miscread);
+    memset(miscread, '\0', sizeof(miscread));
+    file.readBytesUntil('\n', miscread, 8);
+    mopeka_kg[1] = atoi(miscread);
+    memset(miscread, '\0', sizeof(miscread));
+    file.readBytesUntil('\n', miscread, 8);
+    mopeka_unit = atoi(miscread);
+    memset(miscread, '\0', sizeof(miscread));
+    file.close();
+
+    file = SPIFFS.open("/ok.html", "r");
+    html = file.readString();
+    file.close();
+
+    server.sendHeader("Refresh", "2;url=/");
+    server.send(200, "text/html; charset=UTF-8", html);
+}
+
+
 /* ------------------------------------------------------------------------------- */
 void httpBoot() {
     portal_timer = millis();

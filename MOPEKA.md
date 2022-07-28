@@ -19,4 +19,6 @@ _both_ first and second sensor slots. See image.
 If you don't know the right value for centimeters for full container, check a full container with
 Mopeka's official mobile app. Round that value to integer like 35 on the example image.
 
+You can choose the unit here which is used on the display. Centimeters, kilograms or per cent.
+
 ![Mopeka sensors config](s/mopeka_config.jpg)

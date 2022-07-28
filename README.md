@@ -12,9 +12,13 @@ The temperatures, pressure, humidity etc. use [Ruuvi tags](https://ruuvi.com/). 
 product and with them there's no need of inventing the wheel again. Only data format V5 (RAWv2) is supported.
 See Ruuvi documentation for setting the right mode.
 
-**NEW! Now this supports also Xiaomi Mijia Bluetooth Thermometer 2 with 
-[ATC_MiThermometer](https://github.com/atc1441/ATC_MiThermometer)** custom firmware
+Xiaomi Mijia Bluetooth Thermometer 2 with 
+[ATC_MiThermometer](https://github.com/atc1441/ATC_MiThermometer) custom firmware is supported.
 (stock firmware is not supported).
+
+**NEW! Support for [Mopeka✓ sensors](https://www.mopeka.com/product-category/sensor/) is now added.**
+
+See [Mopeka readme](MOPEKA.md) for more information.
 
 Xiaomi thermometers are available eg. from 
 [Banggood](https://www.banggood.com/3Pcs-XIAOMI-Mijia-Bluetooth-Smart-Electric-Digital-Thermometer-Hygrometer-2-p-1595118.html?p=6H24052869562201510Z)
