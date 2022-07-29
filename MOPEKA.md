@@ -13,8 +13,13 @@ ignored here. The readings we get are good enough.
 ### Configuring Mopeka sensors
 
 1. Add them from the portal's sensors config just like another tags.
-2. Go to Mopeka config and add right values. If you have only one Mopeka gas sensor, set the value to
-_both_ first and second sensor slots. See image.
+2. Go to Mopeka config and add right values. Centimeters that the sensor says about a full bottle and
+kilograms of a full bottle.
+
+**NOTE: If you have only one Mopeka gas sensor, set the value to _both_ first and second sensor slots.**
+
+There are separate settings for two containers because someone might have two different containers eg.
+permanently installed LPG tank and a changeable gas bottle.
 
 If you don't know the right value for centimeters for full container, check a full container with
 Mopeka's official mobile app. Round that value to integer like 35 on the example image.
