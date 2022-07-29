@@ -18,7 +18,7 @@ kilograms of a full bottle.
 
 **NOTE: If you have only one Mopeka gas sensor, set the value to _both_ first and second sensor slots.**
 
-There are separate settings for two containers because someone might have two different containers eg.
+There are separate settings for two containers because some people may have two different containers eg.
 permanently installed LPG tank and a changeable gas bottle.
 
 If you don't know the right value for centimeters for full container, check a full container with

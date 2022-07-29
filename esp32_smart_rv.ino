@@ -365,8 +365,13 @@ void setup() {
         mopeka_unit = atoi(miscread);
         memset(miscread, '\0', sizeof(miscread));
         file.close();
+        if (mopeka_unit < 0 || mopeka_unit > 2)  mopeka_unit = 0;
+        if (mopeka_cm[0] < 1)  mopeka_cm[0] = 35;
+        if (mopeka_kg[0] < 1)  mopeka_kg[0] = 11;
+        if (mopeka_cm[1] < 1)  mopeka_cm[1] = mopeka_cm[0];
+        if (mopeka_kg[1] < 1)  mopeka_kg[1] = mopeka_kg[0];
     }
-    
+
     BLEDevice::init("");
     blescan = BLEDevice::getScan();
 
@@ -685,14 +690,14 @@ void screen_task(void * param) {
                     for (uint8_t i = 8; i < 27; i++) {
                         level ^= tagdata[screentag][i];
                     }
-                    
-                    displevel = level*.762; // convert raw level to cm
+
+                    displevel = level * .762; // convert raw level to cm
                     if (displevel < 0) displevel = 0;
                     if (displevel > mopeka_cm[mopeka_id]) displevel = mopeka_cm[mopeka_id];
                     tft.setTextColor(TFT_SKYBLUE, TFT_BLACK);
-                    if (displevel / mopeka_cm[mopeka_id] < 0.2) tft.setTextColor(TFT_YELLOW, TFT_BLACK); 
-                    if (displevel / mopeka_cm[mopeka_id] < 0.1) tft.setTextColor(TFT_RED, TFT_BLACK); 
-                    
+                    if (displevel / mopeka_cm[mopeka_id] < 0.2) tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+                    if (displevel / mopeka_cm[mopeka_id] < 0.1) tft.setTextColor(TFT_RED, TFT_BLACK);
+
                     switch (mopeka_unit) {
                         case 0:
                             sprintf(displaytxt, "\x3c  %d", int(displevel));     // \x3c is gas bottle symbol
@@ -713,7 +718,7 @@ void screen_task(void * param) {
                             strcpy(unitstr, "%");
                             break;
                     }
-                                        
+
                     uint16_t txtwidth = tft.drawString(displaytxt, int(TFTW / 2), -50);
                     uint16_t txtleft = int((TFTW - txtwidth - unitpixels - 4 ) / 2);
                     tft.setTextDatum(TL_DATUM);
@@ -722,7 +727,7 @@ void screen_task(void * param) {
 
                     // draw unit with smaller font, midfont
                     tft.loadFont(midfont);
-                    tft.drawString(unitstr, txtleft + txtwidth +4, basey + 46);
+                    tft.drawString(unitstr, txtleft + txtwidth + 4, basey + 46);
                     tft.unloadFont();
 
                     tft.setTextDatum(TC_DATUM);
@@ -1081,6 +1086,12 @@ void httpSaveMopeka() {
     mopeka_unit = atoi(miscread);
     memset(miscread, '\0', sizeof(miscread));
     file.close();
+
+    if (mopeka_unit < 0 || mopeka_unit > 2)  mopeka_unit = 0;
+    if (mopeka_cm[0] < 1)  mopeka_cm[0] = 35;
+    if (mopeka_kg[0] < 1)  mopeka_kg[0] = 11;
+    if (mopeka_cm[1] < 1)  mopeka_cm[1] = mopeka_cm[0];
+    if (mopeka_kg[1] < 1)  mopeka_kg[1] = mopeka_kg[0];
 
     file = SPIFFS.open("/ok.html", "r");
     html = file.readString();
