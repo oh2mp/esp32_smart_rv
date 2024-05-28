@@ -3,7 +3,7 @@
 
 Here are the binaries that you can upload to an ESP32 Dev Module with `esptool` without compiling yourself.
 
-Use this command. Change the port if needed!
+Use this command (everything in one line). Change the port if needed!
 
 ```
 esptool --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset
