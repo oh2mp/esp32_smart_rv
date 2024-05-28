@@ -5,10 +5,11 @@
 
 */
 
-#include <FreeRTOS.h>
+// #include <FreeRTOS.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <SPIFFS.h>
+#include "FS.h"
+#include <LITTLEFS.h>
 #include <time.h>
 #include "TFT_eSPI.h"
 TFT_eSPI tft = TFT_eSPI();
@@ -40,8 +41,9 @@ TFT_eSPI tft = TFT_eSPI();
 #define TAG_DHT     7
 #define TAG_WATTSON 8
 #define TAG_MOPEKA  9
+#define TAG_IBSTH2  10
 
-const char type_name[10][10] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame", "DS18x20", "DHTxx", "Wattson", "Mopeka\u2713"};
+const char type_name[11][10] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame", "DS18x20", "DHTxx", "Wattson", "Mopeka\u2713", "IBS-TH2"};
 
 // end of tag type enumerations and names
 
@@ -59,8 +61,8 @@ TaskHandle_t buttontask = NULL;
 int tank_volume = 100;
 int flame_threshold = 100;
 char miscread[8];
-uint8_t brightness = 5;
-uint8_t last_brightness = 5;
+uint8_t brightness = 10;
+uint8_t last_brightness = 10;
 
 volatile uint8_t buttonstate = 1;
 volatile uint8_t oldbuttonstate = 1;
@@ -169,6 +171,15 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
                 uint8_t mac[6];
                 tagtype[taginx] = tagTypeFromPayload(payload, mac);
             }
+            // Inkbird IBS-TH2?
+            if (tagtype[taginx] == 0xFF) {
+                if (advDev.haveServiceUUID()) {
+                    if (strcmp(advDev.getServiceUUID().toString().c_str(), "0000fff0-0000-1000-8000-00805f9b34fb") == 0) {
+                        tagtype[taginx] = TAG_IBSTH2;
+                    }
+                }
+            }
+
             // Copy the payload to tagdata
             memcpy(tagdata[taginx], payload, 32);
 
@@ -208,6 +219,15 @@ class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
             memcpy(mac, advDev.getAddress().getNative(), 6);
             uint8_t htype = tagTypeFromPayload(payload, mac);
 
+            // Check if this is Inkbird IBS-TH2
+            if (htype == 0xFF) {
+                if (advDev.haveServiceUUID()) {
+                    if (strcmp(advDev.getServiceUUID().toString().c_str(), "0000fff0-0000-1000-8000-00805f9b34fb") == 0) {
+                        htype = TAG_IBSTH2;
+                    }
+                }
+            }
+
             if (htype != 0xFF && htype != 0) {
                 for (uint8_t i = 0; i < MAX_TAGS; i++) {
                     if (strlen(heardtags[i]) == 0) {
@@ -234,9 +254,9 @@ void loadSavedTags() {
         memset(tagdata[i], 0, sizeof(tagdata[i]));
     }
 
-    if (SPIFFS.exists("/known_tags.txt")) {
+    if (LITTLEFS.exists("/littlefs/known_tags.txt")) {
         uint8_t foo = 0;
-        file = SPIFFS.open("/known_tags.txt", "r");
+        file = LITTLEFS.open("/littlefs/known_tags.txt", "r", false);
         while (file.available()) {
             memset(sname, '\0', sizeof(sname));
             memset(smac, '\0', sizeof(smac));
@@ -323,13 +343,13 @@ void setup() {
     ledcWrite(0, 128);
 
     Serial.begin(115200);
-    Serial.println("\n\nESP32 Smart RV by OH2MP 2020-2022");
+    Serial.println("\n\nESP32 Smart RV by OH2MP 2020-2024");
 
-    SPIFFS.begin();
+    LITTLEFS.begin();
     loadSavedTags();
 
-    if (SPIFFS.exists("/misc.txt")) {
-        file = SPIFFS.open("/misc.txt", "r");
+    if (LITTLEFS.exists("/littlefs/misc.txt")) {
+        file = LITTLEFS.open("/littlefs/misc.txt", "r", false);
         memset(miscread, '\0', sizeof(miscread));
         file.readBytesUntil('\n', miscread, 8);
         flame_threshold = atoi(miscread);
@@ -346,8 +366,8 @@ void setup() {
     } else {
         fce2();
     }
-    if (SPIFFS.exists("/mopeka.txt")) {
-        file = SPIFFS.open("/mopeka.txt", "r");
+    if (LITTLEFS.exists("/littlefs/mopeka.txt")) {
+        file = LITTLEFS.open("/littlefs/mopeka.txt", "r", false);
         memset(miscread, '\0', sizeof(miscread));
         file.readBytesUntil('\n', miscread, 8);
         mopeka_cm[0] = atoi(miscread);
@@ -418,11 +438,11 @@ void loop() {
             startPortal();
         }
         // If brightness has changed over a minute ago, save the value.
-        // This is a way to reduce SPIFFS writes when we don't save it on every button push.
+        // This is a way to reduce LITTLEFS writes when we don't save it on every button push.
         if (brightness_changed != 0) {
             if (millis() - brightness_changed > 60000) {
                 brightness_changed = 0;
-                file = SPIFFS.open("/misc.txt", "w");
+                file = LITTLEFS.open("/littlefs/misc.txt", "w");
                 file.printf("%d\n%d\n%d\n", flame_threshold, tank_volume, brightness);
                 file.close();
                 Serial.println("Brightness has changed. misc.txt saved.");
@@ -463,6 +483,7 @@ void screen_task(void * param) {
         yield();
         // If portal mode is not active, do the tasks and show info
         if (strlen(tagname[screentag]) > 0 && portal_timer == 0) {
+            short taskdelay = 2000;
             memset(displaytxt, 0, sizeof(displaytxt));
             strcat(displaytxt, tagname[screentag]);
 
@@ -731,7 +752,7 @@ void screen_task(void * param) {
                     tft.unloadFont();
 
                     tft.setTextDatum(TC_DATUM);
-                    voltage = ((short)tagdata[screentag][6] >> 7) + 1.5;
+                    voltage = (float)tagdata[screentag][6] / 256.0f * 2.0f + 1.5f; // Mopeka specification
                     sprintf(displaytxt, "%.2f V", voltage);
 
                     tft.loadFont(tinyfont);
@@ -742,7 +763,58 @@ void screen_task(void * param) {
                 mopeka_id++;
                 if (mopeka_id > 1) mopeka_id = 0;
             }
+            // Inkbird IBS-TH2
+            if (tagtype[screentag] == TAG_IBSTH2) {
+                tft.loadFont(bigfont);
 
+                if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
+                    sprintf(displaytxt, "\x26"); // 0x26 = warning triangle sign in the bigfont
+                    tft.setTextColor(TFT_RED, TFT_BLACK);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 32);
+                    tft.unloadFont();
+                } else {
+                    temperature = ((short)tagdata[screentag][15] << 8) | (unsigned short)tagdata[screentag][14];
+                    temperature = round(temperature/10);
+                    voltage = (short)tagdata[screentag][21]; // in Inkbird this is percentage, not voltage.
+                    
+                    sprintf(displaytxt, "%.1f\x29", temperature * 0.1); // 0x29 = degree sign in the bigfont
+
+                    int colinx = int(temperature * 0.1 + 20);
+                    if (colinx < 0) {
+                        colinx = 0;
+                    }
+                    if (colinx > 55) {
+                        colinx = 55;
+                    }
+                    tft.setTextColor(tempcolors[colinx], TFT_BLACK);
+
+                    tft.loadFont(bigfont);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 32);
+                    tft.unloadFont();
+                    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+
+                    sprintf(displaytxt, "%.0f%%", voltage);
+
+                    tft.loadFont(tinyfont);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 80);
+                    tft.unloadFont();
+
+                    // Inkbird logo
+                    static uint8_t inkbird_bits[] = {
+                         0x80, 0x00, 0x00, 0xc0, 0x03, 0x00, 0xe0, 0x03, 0x00, 0xf0, 0xc7, 0x00, 0xf8, 0xe3, 0x01, 0xfc,
+                         0xf1, 0x03, 0xfe, 0xf8, 0x03, 0x7f, 0xfc, 0x03, 0x3f, 0xfe, 0x03, 0x1f, 0xff, 0x03, 0x1f, 0xff,
+                         0x03, 0x1f, 0xfe, 0x03, 0xff, 0xe1, 0x03, 0xff, 0xe3, 0x03, 0xff, 0xe1, 0x03, 0xff, 0xf1, 0x03,
+                         0xff, 0xf8, 0x03, 0x3f, 0xfc, 0x00, 0x3f, 0xfe, 0x00, 0x0f, 0x3f, 0x00,  0x8c, 0x3f, 0x00, 0x80,
+                         0x0f, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x02, 0x00 };
+                    tft.drawXBitmap(TFTW - 18, basey + 42, inkbird_bits, 18, 24, TFT_LOGOCOLOR);
+                }
+            }
+            // if IBS-TH2 and data contains just nulls, then no valid data was got, so skip this tag this time
+            if (tagtype[screentag] == TAG_IBSTH2 && 
+                memcmp(tagdata[screentag]+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 25) == 0) {
+                screentag--;
+                taskdelay = 0;
+            }
             if (basey < TFTH / 2) {
                 tft.drawLine(0, basey + TFTH / 3 - 6, TFTW - 1, basey + TFTH / 3 - 6, TFT_LIGHTGREY);
             }
@@ -752,9 +824,9 @@ void screen_task(void * param) {
             }
             screenslot++;
             if (screenslot > 2) {
-                screenslot = 0;
+               screenslot = 0;
             }
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
+            vTaskDelay(taskdelay / portTICK_PERIOD_MS);
         }
         // Portal mode active. Show timer to timeout.
         yield();
@@ -829,6 +901,7 @@ void startPortal() {
     tft.drawString("\x3e", int(TFTW / 2), 30); // print config symbol
     tft.unloadFont();
 
+    delay(100);
     WiFi.disconnect();
     delay(100);
     WiFi.mode(WIFI_AP);
@@ -864,7 +937,7 @@ void httpRoot() {
     portal_timer = millis();
     String html;
 
-    file = SPIFFS.open("/index.html", "r");
+    file = LITTLEFS.open("/littlefs/index.html", "r", false);
     html = file.readString();
     file.close();
 
@@ -881,7 +954,7 @@ void httpSensors() {
 
     portal_timer = millis();
 
-    file = SPIFFS.open("/sensors.html", "r");
+    file = LITTLEFS.open("/littlefs/sensors.html", "r", false);
     html = file.readString();
     file.close();
 
@@ -941,7 +1014,7 @@ void httpSaveSensors() {
     portal_timer = millis();
     String html;
 
-    file = SPIFFS.open("/known_tags.txt", "w");
+    file = LITTLEFS.open("/littlefs/known_tags.txt", "w");
 
     for (int i = 0; i < server.arg("counter").toInt(); i++) {
         if (server.arg("sname" + String(i)).length() > 0) {
@@ -954,7 +1027,7 @@ void httpSaveSensors() {
     file.close();
     loadSavedTags(); // reread
 
-    file = SPIFFS.open("/ok.html", "r");
+    file = LITTLEFS.open("/littlefs/ok.html", "r", false);
     html = file.readString();
     file.close();
 
@@ -967,7 +1040,7 @@ void httpStyle() {
     portal_timer = millis();
     String css;
 
-    file = SPIFFS.open("/style.css", "r");
+    file = LITTLEFS.open("/littlefs/style.css", "r", false);
     css = file.readString();
     file.close();
     server.send(200, "text/css", css);
@@ -978,7 +1051,7 @@ void httpMisc() {
     portal_timer = millis();
     String html;
 
-    file = SPIFFS.open("/misc.html", "r");
+    file = LITTLEFS.open("/littlefs/misc.html", "r", false);
     html = file.readString();
     file.close();
 
@@ -993,7 +1066,7 @@ void httpMopeka() {
     portal_timer = millis();
     String html;
 
-    file = SPIFFS.open("/mopeka.html", "r");
+    file = LITTLEFS.open("/littlefs/mopeka.html", "r", false);
     html = file.readString();
     file.close();
 
@@ -1026,14 +1099,14 @@ void httpSaveMisc() {
     portal_timer = millis();
     String html;
 
-    file = SPIFFS.open("/misc.txt", "w");
+    file = LITTLEFS.open("/littlefs/misc.txt", "w");
     file.printf("%s\n", server.arg("thr").c_str());
     file.printf("%s\n", server.arg("tankvol").c_str());
     file.printf("%d\n", brightness);
     file.close();
 
     // reread
-    file = SPIFFS.open("/misc.txt", "r");
+    file = LITTLEFS.open("/littlefs/misc.txt", "r", false);
     memset(miscread, '\0', sizeof(miscread));
     file.readBytesUntil('\n', miscread, 8);
     flame_threshold = atoi(miscread);
@@ -1046,7 +1119,7 @@ void httpSaveMisc() {
     memset(miscread, '\0', sizeof(miscread));
     file.close();
 
-    file = SPIFFS.open("/ok.html", "r");
+    file = LITTLEFS.open("/littlefs/ok.html", "r", false);
     html = file.readString();
     file.close();
 
@@ -1059,7 +1132,7 @@ void httpSaveMopeka() {
     portal_timer = millis();
     String html;
 
-    file = SPIFFS.open("/mopeka.txt", "w");
+    file = LITTLEFS.open("/littlefs/mopeka.txt", "w");
     file.printf("%s\n", server.arg("cm0").c_str());
     file.printf("%s\n", server.arg("kg0").c_str());
     file.printf("%s\n", server.arg("cm1").c_str());
@@ -1068,7 +1141,7 @@ void httpSaveMopeka() {
     file.close();
 
     // reread
-    file = SPIFFS.open("/mopeka.txt", "r");
+    file = LITTLEFS.open("/littlefs/mopeka.txt", "r", false);
     memset(miscread, '\0', sizeof(miscread));
     file.readBytesUntil('\n', miscread, 8);
     mopeka_cm[0] = atoi(miscread);
@@ -1093,7 +1166,7 @@ void httpSaveMopeka() {
     if (mopeka_cm[1] < 1)  mopeka_cm[1] = mopeka_cm[0];
     if (mopeka_kg[1] < 1)  mopeka_kg[1] = mopeka_kg[0];
 
-    file = SPIFFS.open("/ok.html", "r");
+    file = LITTLEFS.open("/littlefs/ok.html", "r", false);
     html = file.readString();
     file.close();
 
@@ -1107,7 +1180,7 @@ void httpBoot() {
     portal_timer = millis();
     String html;
 
-    file = SPIFFS.open("/ok.html", "r");
+    file = LITTLEFS.open("/littlefs/ok.html", "r", false);
     html = file.readString();
     file.close();
 

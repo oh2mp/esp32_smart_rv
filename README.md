@@ -16,8 +16,10 @@ Xiaomi Mijia Bluetooth Thermometer 2 with
 [ATC_MiThermometer](https://github.com/atc1441/ATC_MiThermometer) custom firmware is supported.
 (stock firmware is not supported).
 
-**NEW! Support for [Mopeka✓ sensors](https://www.mopeka.com/product-category/sensor/) is now added.
-See [Mopeka readme](MOPEKA.md) for more information.**
+**NEW! [Inkbird IBS-TH2](https://inkbird.com/products/ibs-th2-temp) (version without humidity and external sensor) support added.**
+
+Support for [Mopeka✓ sensors](https://www.mopeka.com/product-category/sensor/) is now added.
+See [Mopeka readme](MOPEKA.md) for more information.
 
 Xiaomi thermometers are available eg. from 
 [Banggood](https://www.banggood.com/3Pcs-XIAOMI-Mijia-Bluetooth-Smart-Electric-Digital-Thermometer-Hygrometer-2-p-1595118.html?p=6H24052869562201510Z)
@@ -77,8 +79,12 @@ Then the brightness setting acts as the maximum brightness.
 #define BLLED 19                 // backlight led
 ```
 
-You must also use the [Arduino ESP32 filesystem uploader](https://github.com/me-no-dev/arduino-esp32fs-plugin/)
-to upload the files in the data directory. There are the html and css files needed for portal.
+You will need also **LittleFS_esp32 1.0.6** library. Version 1.0.7 is buggy. Install it from the IDE library manager.
+
+You can use the filesystem uploader tool to upload the contents of data library. It contains the html pages for
+the configuring portal. Or you can just upload the provided image with esptool:
+
+`esptool --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size detect 3211264 esp32_smart_rv.littlefs.bin`
 
 ------
 
