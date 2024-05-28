@@ -799,11 +799,14 @@ void screen_task(void * param) {
                     sprintf(displaytxt, "%.0f%%", voltage);
 
                     tft.loadFont(tinyfont);
-                    tft.drawString(displaytxt, int(TFTW / 2 + 28), basey + 80);
+                    tft.drawString(displaytxt, int(TFTW / 2 + 30), basey + 80);
                     tft.unloadFont();
                     // Battery symbol. IBS-TH2 gives battery as percent, not voltage.
-                    tft.fillSmoothRoundRect(int(TFTW / 2 -36), basey + 80, 14, 14, 3, TFT_WHITE);
-                    tft.drawSmoothRoundRect(int(TFTW / 2 -36), basey + 80, 3, 2, 28, 14, TFT_WHITE);
+                    tft.fillRect(int(TFTW / 2 -34), basey + 80, 12, 13, TFT_WHITE);
+                    tft.drawRect(int(TFTW / 2 -33), basey + 86, 8, 2, TFT_BLACK);
+                    tft.drawRect(int(TFTW / 2 -20), basey + 86, 8, 2, TFT_WHITE);
+                    tft.drawRect(int(TFTW / 2 -17), basey + 83, 2, 8, TFT_WHITE);
+                    tft.drawSmoothRoundRect(int(TFTW / 2 -36), basey + 80, 3, 2, 28, 13, TFT_WHITE);
                     tft.fillRect(int(TFTW / 2 -7), basey + 84, 3, 6, TFT_WHITE);
 
                     // Inkbird logo
