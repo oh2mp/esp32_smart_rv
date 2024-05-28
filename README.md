@@ -8,13 +8,13 @@ different BLE beacons are supported now and more are to come. If you don't have 
 just ignore the support. The software shows data only from known beacons that are configured from the
 web portal (see later).
 
-[Ruuvi tags](https://ruuvi.com/) with data format V5 (RAWv2) is supported.
+[Ruuvi tag](https://ruuvi.com/) with data format V5 (RAWv2) is supported.
 
 Xiaomi Mijia Bluetooth Thermometer 2 with 
 [ATC_MiThermometer](https://github.com/atc1441/ATC_MiThermometer) custom firmware is supported.
 (stock firmware is not supported).
 
-**NEW! [Inkbird IBS-TH2](https://inkbird.com/products/ibs-th2-temp) (version without humidity and external sensor) support added.**
+**NEW! [Inkbird IBS-TH2](https://inkbird.com/products/ibs-th2-temp) (version without humidity and external sensor) support added in May 2024.**
 
 [Mopeka✓ sensors](https://www.mopeka.com/) gas tank sensor is supported.
 See [Mopeka readme](MOPEKA.md) for more information.

@@ -1,6 +1,6 @@
 ## About Mopeka✓ gas tank sensors and OH2MP Smart RV
 
-[Mopeka✓ sensors](https://www.mopeka.com/product-category/sensor/) are a family of gas tank level sensors 
+[Mopeka✓ gas tank sensors](https://www.mopeka.com/) are a family of gas tank level sensors 
 that are mounted in the bottom of gas tanks. They use ultrasound on measuring the distance from bottom to 
 the surface of the liquified gas in the container. The exact amount of gas depends mostly on geometry of 
 the container but also gas composition and temperature affect a little.
