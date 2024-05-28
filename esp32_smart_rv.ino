@@ -23,12 +23,12 @@ TFT_eSPI tft = TFT_eSPI();
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
 
-#define BUTTON 13                // push button for lightness and long press starts portal
+#define BUTTON 12                // push button for lightness and long press starts portal
 #define APTIMEOUT 120000         // Portal timeout. Reboot after ms if no activity.
 
 #define MAX_TAGS 12
 #define BLLED 19                 // backlight led
-#define TFT_LOGOCOLOR 0x3186     // rgb565 for #333333
+#define TFT_LOGOCOLOR 0x4228     // rgb565 for #444444
 //   nice converter: http://www.rinkydinkelectronics.com/calc_rgb565.php
 
 // Tag type enumerations and names
@@ -174,12 +174,13 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
                 if (advDev.haveServiceUUID()) {
                     if (strcmp(advDev.getServiceUUID().toString().c_str(), "0000fff0-0000-1000-8000-00805f9b34fb") == 0) {
                         tagtype[taginx] = TAG_IBSTH2;
-                        // ignore if payload doesn't contain valid data.
-                        if (memcmp(payload+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 25) == 0) {
-                            return;
-                        }
                     }
                 }
+            }
+            // ignore if payload doesn't contain valid data.
+            if (tagtype[taginx] == TAG_IBSTH2 &&
+                memcmp(payload+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 25) == 0) {
+                return;
             }
 
             tagtime[taginx] = millis();
