@@ -163,9 +163,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 
             memset(payload, 0, 32);
             memcpy(payload, advDev.getPayload(), 32);
-            tagtime[taginx] = millis();
-            memset(tagdata[taginx], 0, sizeof(tagdata[taginx]));
-
+            
             // Don't we know the type of this device yet?
             if (tagtype[taginx] == 0) {
                 uint8_t mac[6];
@@ -176,11 +174,17 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
                 if (advDev.haveServiceUUID()) {
                     if (strcmp(advDev.getServiceUUID().toString().c_str(), "0000fff0-0000-1000-8000-00805f9b34fb") == 0) {
                         tagtype[taginx] = TAG_IBSTH2;
+                        // ignore if payload doesn't contain valid data.
+                        if (memcmp(payload+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 25) == 0) {
+                            return;
+                        }
                     }
                 }
             }
 
+            tagtime[taginx] = millis();
             // Copy the payload to tagdata
+            memset(tagdata[taginx], 0, sizeof(tagdata[taginx]));
             memcpy(tagdata[taginx], payload, 32);
 
             Serial.printf("BLE callback: payload=");
@@ -483,7 +487,6 @@ void screen_task(void * param) {
         yield();
         // If portal mode is not active, do the tasks and show info
         if (strlen(tagname[screentag]) > 0 && portal_timer == 0) {
-            short taskdelay = 2000;
             memset(displaytxt, 0, sizeof(displaytxt));
             strcat(displaytxt, tagname[screentag]);
 
@@ -796,8 +799,12 @@ void screen_task(void * param) {
                     sprintf(displaytxt, "%.0f%%", voltage);
 
                     tft.loadFont(tinyfont);
-                    tft.drawString(displaytxt, int(TFTW / 2), basey + 80);
+                    tft.drawString(displaytxt, int(TFTW / 2 + 28), basey + 80);
                     tft.unloadFont();
+                    // Battery symbol. IBS-TH2 gives battery as percent, not voltage.
+                    tft.fillSmoothRoundRect(int(TFTW / 2 -36), basey + 80, 14, 14, 3, TFT_WHITE);
+                    tft.drawSmoothRoundRect(int(TFTW / 2 -36), basey + 80, 3, 2, 28, 14, TFT_WHITE);
+                    tft.fillRect(int(TFTW / 2 -7), basey + 84, 3, 6, TFT_WHITE);
 
                     // Inkbird logo
                     static uint8_t inkbird_bits[] = {
@@ -808,12 +815,6 @@ void screen_task(void * param) {
                          0x0f, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x02, 0x00 };
                     tft.drawXBitmap(TFTW - 18, basey + 42, inkbird_bits, 18, 24, TFT_LOGOCOLOR);
                 }
-            }
-            // if IBS-TH2 and data contains just nulls, then no valid data was got, so skip this tag this time
-            if (tagtype[screentag] == TAG_IBSTH2 && 
-                memcmp(tagdata[screentag]+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 25) == 0) {
-                screentag--;
-                taskdelay = 0;
             }
             if (basey < TFTH / 2) {
                 tft.drawLine(0, basey + TFTH / 3 - 6, TFTW - 1, basey + TFTH / 3 - 6, TFT_LIGHTGREY);
@@ -826,7 +827,7 @@ void screen_task(void * param) {
             if (screenslot > 2) {
                screenslot = 0;
             }
-            vTaskDelay(taskdelay / portTICK_PERIOD_MS);
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
         // Portal mode active. Show timer to timeout.
         yield();
