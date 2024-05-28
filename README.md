@@ -50,6 +50,8 @@ and the price is less than 10€.
 
 ## Code configuration, wiring and dependencies
 
+**NOTE: The current version has been tested with Arduino IDE version 2.3.2 and it can't be guaranteed that other versions work!**
+
 The screen graphics use [Bodmer's TFT_eSPI library](https://github.com/Bodmer/TFT_eSPI).
 
 The library needs to be configured for the right driver chip etc. and with this project it's enough
