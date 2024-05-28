@@ -8,9 +8,7 @@ different BLE beacons are supported now and more are to come. If you don't have 
 just ignore the support. The software shows data only from known beacons that are configured from the
 web portal (see later).
 
-The temperatures, pressure, humidity etc. use [Ruuvi tags](https://ruuvi.com/). Ruuvi tag is an excellent
-product and with them there's no need of inventing the wheel again. Only data format V5 (RAWv2) is supported.
-See Ruuvi documentation for setting the right mode.
+[Ruuvi tags](https://ruuvi.com/) with data format V5 (RAWv2) is supported.
 
 Xiaomi Mijia Bluetooth Thermometer 2 with 
 [ATC_MiThermometer](https://github.com/atc1441/ATC_MiThermometer) custom firmware is supported.
@@ -18,13 +16,8 @@ Xiaomi Mijia Bluetooth Thermometer 2 with
 
 **NEW! [Inkbird IBS-TH2](https://inkbird.com/products/ibs-th2-temp) (version without humidity and external sensor) support added.**
 
-Support for [Mopeka✓ sensors](https://www.mopeka.com/product-category/sensor/) is now added.
+[Mopeka✓ sensors](https://www.mopeka.com/) gas tank sensor is supported.
 See [Mopeka readme](MOPEKA.md) for more information.
-
-Xiaomi thermometers are available eg. from 
-[Banggood](https://www.banggood.com/3Pcs-XIAOMI-Mijia-Bluetooth-Smart-Electric-Digital-Thermometer-Hygrometer-2-p-1595118.html?p=6H24052869562201510Z)
-or
-[AliExpress](https://www.aliexpress.com/item/4000406818501.html)
 
 Other beacons that are supported are:
 
@@ -89,7 +82,7 @@ You will need also **LittleFS_esp32 1.0.6** library. Version 1.0.7 is buggy. Ins
 You can use the filesystem uploader tool to upload the contents of data library. It contains the html pages for
 the configuring portal. Or you can just upload the provided image with esptool:
 
-`esptool --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size detect 3211264 esp32_smart_rv.littlefs.bin`
+`esptool --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash  --flash_mode dio --flash_freq 80m --flash_size detect 3211264 esp32_smart_rv.littlefs.bin`
 
 ------
 
