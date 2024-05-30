@@ -982,8 +982,9 @@ void gattcl_task(void *parameter) {
            wCharacteristic = pRemoteService->getCharacteristic("00001235-0000-1000-8000-00805F9B34FB");
         }
         // Send query request
+        // See: https://github.com/klightspeed/BrassMonkeyFridgeMonitor
         if (wCharacteristic != nullptr) wCharacteristic->writeValue({0xfe, 0xfe, 3, 1, 2, 0}, 6);
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
+        vTaskDelay(60000 / portTICK_PERIOD_MS); // Once per minute is enough
       }
   } else vTaskDelay(10000 / portTICK_PERIOD_MS);
 }
