@@ -14,7 +14,10 @@ Xiaomi Mijia Bluetooth Thermometer 2 with
 [ATC_MiThermometer](https://github.com/atc1441/ATC_MiThermometer) custom firmware is supported.
 (stock firmware is not supported).
 
-**NEW! [Inkbird IBS-TH2](https://inkbird.com/products/ibs-th2-temp) (version without humidity and external sensor) support added in May 2024.**
+**NEW in May 2024**
+
+- **[Inkbird IBS-TH2](https://inkbird.com/products/ibs-th2-temp) (version without humidity and external sensor)**
+- **[Alpicool portable fridges](https://www.alpicool.com) (most of the models, I believe. [Read more](Alpicool.md)) 
 
 [Mopeka✓ sensors](https://www.mopeka.com/) gas tank sensor is supported.
 See [Mopeka readme](MOPEKA.md) for more information.

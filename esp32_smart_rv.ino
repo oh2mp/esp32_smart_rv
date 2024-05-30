@@ -32,18 +32,19 @@ TFT_eSPI tft = TFT_eSPI();
 //   nice converter: http://www.rinkydinkelectronics.com/calc_rgb565.php
 
 // Tag type enumerations and names
-#define TAG_RUUVI   1
-#define TAG_MIJIA   2
-#define TAG_ENERGY  3
-#define TAG_WATER   4
-#define TAG_FLAME   5
-#define TAG_DS1820  6
-#define TAG_DHT     7
-#define TAG_WATTSON 8
-#define TAG_MOPEKA  9
-#define TAG_IBSTH2  10
+#define TAG_RUUVI     1
+#define TAG_MIJIA     2
+#define TAG_ENERGY    3
+#define TAG_WATER     4
+#define TAG_FLAME     5
+#define TAG_DS1820    6
+#define TAG_DHT       7
+#define TAG_WATTSON   8
+#define TAG_MOPEKA    9
+#define TAG_IBSTH2   10
+#define TAG_ALPICOOL 11
 
-const char type_name[11][10] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame", "DS18x20", "DHTxx", "Wattson", "Mopeka\u2713", "IBS-TH2"};
+const char type_name[12][10] PROGMEM = {"", "\u0550UUVi", "ATC_Mi", "Energy", "Water", "Flame", "DS18x20", "DHTxx", "Wattson", "Mopeka\u2713", "IBS-TH2", "Alpicool"};
 
 // end of tag type enumerations and names
 
@@ -55,8 +56,11 @@ uint8_t tagtype[MAX_TAGS];       // "cached" value for tag type
 uint8_t tagcount = 0;            // total amount of known tags
 int screentag = 0;
 int screenslot = 0;
+char gattcache[32];              // Space for caching GATT payload
+
 TaskHandle_t screentask = NULL;
 TaskHandle_t buttontask = NULL;
+TaskHandle_t gattcltask = NULL;
 
 int tank_volume = 100;
 int flame_threshold = 100;
@@ -78,12 +82,14 @@ uint32_t portal_timer = 0;
 uint32_t request_timer = 0;
 uint32_t last_bri = 0;
 uint32_t brightness_changed = 0;
+bool is_scanning = false;
 
 char heardtags[MAX_TAGS][18];
 uint8_t heardtagtype[MAX_TAGS];
 
 File file;
 BLEScan* blescan;
+BLEClient *pClient;
 
 // RGB565 map for showing temperatures with colors like in weather maps.
 const uint16_t tempcolors[] PROGMEM = {
@@ -110,6 +116,16 @@ uint8_t getTagIndex(const char *mac) {
     return 0xFF; // no tag with this mac found
 }
 
+/* ------------------------------------------------------------------------------- */
+/* Find Alpicool fridge from known tags                                            */
+uint8_t findAlpicool() {
+    for (uint8_t i = 0; i < MAX_TAGS; i++) {
+        if (tagtype[i] == TAG_ALPICOOL) {
+            return i;
+        }
+    }
+    return 0xFF; // not found
+}
 /* ------------------------------------------------------------------------------- */
 /*  Detect tag type from payload and mac
 
@@ -140,6 +156,8 @@ uint8_t tagTypeFromPayload(const uint8_t *payload, const uint8_t *mac) {
         if (memcmp(payload + 5, "\xE5\x02\x13\x1A", 4) == 0)  return TAG_FLAME;
         if (memcmp(payload + 5, "\xE5\x02\x20\x18", 4) == 0)  return TAG_DS1820;
     }
+    // Alpicool fridge?
+    if (memcmp(payload, "\x02\x01\x06", 3) == 0 && memcmp(payload + 9, "ZHJIELI", 7) == 0) return TAG_ALPICOOL;
     // ATC_MiThermometer? The data should contain 10161a18 in the beginning and mac at offset 4.
     if (memcmp(payload, "\x10\x16\x1A\x18", 4) == 0 && memcmp(mac, payload + 4, 6) == 0) return TAG_MIJIA;
     // Mopeka gas tank sensor?
@@ -151,7 +169,7 @@ uint8_t tagTypeFromPayload(const uint8_t *payload, const uint8_t *mac) {
 
 /* ------------------------------------------------------------------------------- */
 /*  Known devices callback
-    /* ------------------------------------------------------------------------------- */
+/* ------------------------------------------------------------------------------- */
 
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
         void onResult(BLEAdvertisedDevice advDev) {
@@ -187,6 +205,9 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
             // Copy the payload to tagdata
             memset(tagdata[taginx], 0, sizeof(tagdata[taginx]));
             memcpy(tagdata[taginx], payload, 32);
+            if (tagtype[taginx] == TAG_ALPICOOL) {
+                memcpy(tagdata[taginx], gattcache, 32);
+            }
 
             Serial.printf("BLE callback: payload=");
             for (uint8_t i = 0; i < 32; i++) {
@@ -197,8 +218,32 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 };
 
 /* ------------------------------------------------------------------------------- */
+/*  Alpicool callback
+/* ------------------------------------------------------------------------------- */
+static void alpicoolCallback(
+  BLERemoteCharacteristic* pBLERemoteCharacteristic,
+  uint8_t* pData,
+  size_t length,
+  bool isNotify) {
+
+    memset(gattcache,0,sizeof(gattcache));
+    memcpy(gattcache,pData,length);
+
+    short temperature = 0;
+    short wanted = 0;
+
+    temperature = (short)pData[18];
+    wanted = (short)pData[8];
+    Serial.print("Alpicool GATT payload=");
+    for (uint8_t i = 0; i < length+1; i++) {
+        Serial.printf("%02x", pData[i]);
+    }
+    if (pClient->isConnected()) pClient->disconnect();
+}
+
+/* ------------------------------------------------------------------------------- */
 /*  Find new devices when portal is started
-    /* ------------------------------------------------------------------------------- */
+/* ------------------------------------------------------------------------------- */
 class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
         void onResult(BLEAdvertisedDevice advDev) {
             uint8_t payload[32];
@@ -215,11 +260,7 @@ class ScannedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
             // skip known tags, we are trying to find new
             if (taginx != 0xFF) return;
 
-            /*  we are interested only about Ruuvi tags (Manufacturer ID 0x0499)
-                and self made tags that have Espressif ID 0x02E5
-                and Xiaomi Mijia thermometer with atc1441 custom firmware
-                and Mopeka✓ gas tank sensors
-            */
+            /*  we are interested only about known device types */
             uint8_t mac[6];
             memcpy(mac, advDev.getAddress().getNative(), 6);
             uint8_t htype = tagTypeFromPayload(payload, mac);
@@ -353,6 +394,8 @@ void setup() {
     LITTLEFS.begin();
     loadSavedTags();
 
+    memset(gattcache,0,sizeof(gattcache));
+
     if (LITTLEFS.exists("/littlefs/misc.txt")) {
         file = LITTLEFS.open("/littlefs/misc.txt", "r", false);
         memset(miscread, '\0', sizeof(miscread));
@@ -399,6 +442,7 @@ void setup() {
 
     BLEDevice::init("");
     blescan = BLEDevice::getScan();
+    pClient = BLEDevice::createClient();
 
     blescan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
     blescan->setActiveScan(true);
@@ -421,8 +465,9 @@ void loop() {
     if (portal_timer == 0) {
         // Make a 9 second scan every 15 seconds.
         if (time(NULL) % 15 == 0) {
-
+            while (pClient->isConnected()) delay(100);
             Serial.printf("============= start scan\n");
+            is_scanning = true;
             BLEScanResults foundDevices = blescan->start(9, false);
             blescan->clearResults();
             delay(250);
@@ -431,6 +476,7 @@ void loop() {
             */
             if (foundDevices.getCount() == 0 && tagcount > 0) ESP.restart();
             Serial.printf("============= end scan\n");
+            is_scanning = false;
         }
 
         // For make sure if button release is not detected. It sometimes happen.
@@ -453,7 +499,10 @@ void loop() {
                 Serial.println("Brightness has changed. misc.txt saved.");
             }
         }
-
+        // If not yet started and we have an Alpicool fridge, start the GATT task.
+        if (gattcltask == nullptr && findAlpicool() != 0xFF) {
+            xTaskCreate(gattcl_task, "gattcl", 4096, NULL, 3, &gattcltask);
+        }
     } else {
         // Else the portal mode is active
         server.handleClient();
@@ -488,6 +537,7 @@ void screen_task(void * param) {
         yield();
         // If portal mode is not active, do the tasks and show info
         if (strlen(tagname[screentag]) > 0 && portal_timer == 0) {
+
             memset(displaytxt, 0, sizeof(displaytxt));
             strcat(displaytxt, tagname[screentag]);
 
@@ -817,9 +867,57 @@ void screen_task(void * param) {
                          0x03, 0x1f, 0xfe, 0x03, 0xff, 0xe1, 0x03, 0xff, 0xe3, 0x03, 0xff, 0xe1, 0x03, 0xff, 0xf1, 0x03,
                          0xff, 0xf8, 0x03, 0x3f, 0xfc, 0x00, 0x3f, 0xfe, 0x00, 0x0f, 0x3f, 0x00,  0x8c, 0x3f, 0x00, 0x80,
                          0x0f, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x02, 0x00 };
-                    tft.drawXBitmap(TFTW - 18, basey + 42, inkbird_bits, 18, 24, TFT_LOGOCOLOR);
+                    tft.drawXBitmap(TFTW - 22, basey + 40, inkbird_bits, 18, 24, TFT_LOGOCOLOR);
                 }
             }
+            // Alpicool fridge
+            if (tagtype[screentag] == TAG_ALPICOOL) {
+                tft.loadFont(bigfont);
+
+                if (tagdata[screentag][0] != 0xFE) tagtime[screentag] = 0; // no data yet
+                if (tagtime[screentag] == 0 || millis() - tagtime[screentag] > 300000) {
+                    sprintf(displaytxt, "\x26"); // 0x26 = warning triangle sign in the bigfont
+                    tft.setTextColor(TFT_RED, TFT_BLACK);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 32);
+                    tft.unloadFont();
+                } else {
+                    temperature = (short)tagdata[screentag][18];
+                    short wanted = (short)tagdata[screentag][8]; // wanted temperature
+                    short ecomode = (short)tagdata[screentag][6]; // mode. 0 = MAX, 1 = ECO
+                    
+                    sprintf(displaytxt, "%d\x29", temperature); // 0x29 = degree sign in the bigfont
+
+                    int colinx = int(temperature * 0.1 + 20);
+                    if (colinx < 0) {
+                        colinx = 0;
+                    }
+                    if (colinx > 55) {
+                        colinx = 55;
+                    }
+                    tft.setTextColor(tempcolors[colinx], TFT_BLACK);
+
+                    tft.loadFont(bigfont);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 32);
+                    tft.unloadFont();
+                    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+
+                    if (ecomode == 0) {
+                        sprintf(displaytxt, "%d°  MAX   %.1f V", wanted, (short)tagdata[screentag][20], (short)tagdata[screentag][21]);
+                    } else {
+                        sprintf(displaytxt, "%d°  ECO   %d.%d V", wanted, (short)tagdata[screentag][20], (short)tagdata[screentag][21]);
+                    }
+
+                    tft.loadFont(tinyfont);
+                    tft.drawString(displaytxt, int(TFTW / 2), basey + 80);
+                    tft.unloadFont();
+
+                    // Alpicool logo
+                    tft.drawWideLine(TFTW - 24, basey + 58, TFTW - 14, basey + 41, 3, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
+                    tft.drawWideLine(TFTW -  4, basey + 58, TFTW - 14, basey + 41, 3, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
+                    tft.drawWideLine(TFTW -  4, basey + 58, TFTW - 18, basey + 49, 3, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
+                }
+            }
+
             if (basey < TFTH / 2) {
                 tft.drawLine(0, basey + TFTH / 3 - 6, TFTW - 1, basey + TFTH / 3 - 6, TFT_LIGHTGREY);
             }
@@ -852,6 +950,45 @@ void screen_task(void * param) {
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
+
+/* ------------------------------------------------------------------------------- */
+/*
+    This task handles Alpicool fridge GATT client
+*/
+void gattcl_task(void *parameter) {
+  char amac[18];
+  memset(amac, 0, sizeof(amac));
+  vTaskDelay(10000 / portTICK_PERIOD_MS); // sleep 10s in the beginning and give time for scan
+  // wait until we really know if we have an Alpicool fridge
+  while (findAlpicool() == 0xFF) vTaskDelay(1000 / portTICK_PERIOD_MS);
+  memcpy(amac, tagmac[findAlpicool()], 18);
+
+  if (amac[0] != 0) {
+      BLEAddress serverAddress(amac);
+      BLERemoteCharacteristic *rCharacteristic;
+      BLERemoteCharacteristic *wCharacteristic;
+      Serial.println("GATT task starting");
+
+      while (1) {
+        while (is_scanning) vTaskDelay(100 / portTICK_PERIOD_MS);
+        if (!pClient->isConnected()) {
+            pClient->connect(serverAddress);
+            pClient->setMTU(512);
+        }
+        BLERemoteService *pRemoteService = pClient->getService("00001234-0000-1000-8000-00805F9B34FB");
+        if (pRemoteService != nullptr) {
+           rCharacteristic = pRemoteService->getCharacteristic("00001236-0000-1000-8000-00805F9B34FB");
+           rCharacteristic->registerForNotify(alpicoolCallback);
+           wCharacteristic = pRemoteService->getCharacteristic("00001235-0000-1000-8000-00805F9B34FB");
+        }
+        // Send query request
+        if (wCharacteristic != nullptr) wCharacteristic->writeValue({0xfe, 0xfe, 3, 1, 2, 0}, 6);
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
+      }
+  } else vTaskDelay(10000 / portTICK_PERIOD_MS);
+}
+
+
 /* ------------------------------------------------------------------------------- */
 /*  Portal code begins here
 
@@ -868,6 +1005,8 @@ void startPortal() {
     portENTER_CRITICAL_ISR(&mux);
     vTaskDelete(buttontask);
     detachInterrupt(digitalPinToInterrupt(BUTTON));
+    vTaskDelete(gattcltask);
+    if (pClient->isConnected()) pClient->disconnect();
     portEXIT_CRITICAL_ISR(&mux);
 
     // In portal mode force the backlight to be bright.
