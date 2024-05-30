@@ -1005,7 +1005,7 @@ void startPortal() {
     portENTER_CRITICAL_ISR(&mux);
     vTaskDelete(buttontask);
     detachInterrupt(digitalPinToInterrupt(BUTTON));
-    vTaskDelete(gattcltask);
+    if (gattcltask != nullptr) vTaskDelete(gattcltask);
     if (pClient->isConnected()) pClient->disconnect();
     portEXIT_CRITICAL_ISR(&mux);
 
