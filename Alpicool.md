@@ -9,7 +9,7 @@ The Bluetooth protocol of these fridges has been reverse engineered and
 
 Because I have a version without freezer unit, I could not implement support for them, because it 
 most likely would have caused some bugs when I don't have accurate data for to debug against.
-So at the moment the Smart RV gizmo supports fridges without freezer only.
+So at the moment the Smart RV gizmo supports fridges without freezer only and only one at a time.
 
 Example photo of a similar fridge as mine:
 
