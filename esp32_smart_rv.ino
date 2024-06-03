@@ -58,6 +58,7 @@ int screentag = 0;
 int screenslot = 0;
 char gattcache[32];              // Space for caching GATT payload
 int clientnum = 0;
+int task_counter = 0;
 
 TaskHandle_t screentask = NULL;
 TaskHandle_t buttontask = NULL;
@@ -85,12 +86,14 @@ uint32_t ble_timer = 0;
 uint32_t last_bri = 0;
 uint32_t brightness_changed = 0;
 uint8_t alpicool_index = 0xFF;  // If we have an Alpicool, store its tag index here.
+bool alpicool_heard = false;    // Did we hear one on last iteration?
 
 char heardtags[MAX_TAGS][18];
 uint8_t heardtagtype[MAX_TAGS];
 
 File file;
 BLEScan* blescan;
+BLEScanResults foundDevices;
 BLEClient *pClient;
 BLERemoteService *pRemoteService;
 BLERemoteCharacteristic *rCharacteristic;
@@ -163,7 +166,7 @@ uint8_t tagTypeFromPayload(const uint8_t *payload, const uint8_t *mac) {
     return 0xFF; // unknown
 }
 // Define the MyClientCallbacks class
-class MyClientCallbacks : public BLEClientCallbacks {
+/*class MyClientCallbacks : public BLEClientCallbacks {
 public:
   void onConnect(BLEClient* pClient) {
     Serial.println("Connected to fridge");
@@ -172,7 +175,8 @@ public:
   void onDisconnect(BLEClient* pClient) {
     Serial.println("Disconnected from fridge");
   }
-};
+};*/
+
 /* ------------------------------------------------------------------------------- */
 /*  Known devices callback
 /* ------------------------------------------------------------------------------- */
@@ -214,6 +218,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
             if (tagtype[taginx] == TAG_ALPICOOL) {
                 memcpy(tagdata[taginx], gattcache, 32);
                 alpicool_index = taginx;
+                alpicool_heard = true;
             }
 
             Serial.printf("BLE callback: payload=");
@@ -227,7 +232,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 /* ------------------------------------------------------------------------------- */
 /*  Alpicool callback
 /* ------------------------------------------------------------------------------- */
-static void alpicoolCallback(
+void alpicoolCallback(
   BLERemoteCharacteristic* pBLERemoteCharacteristic,
   uint8_t* pData,
   size_t length,
@@ -453,7 +458,7 @@ void setup() {
     BLEDevice::init("");
     blescan = BLEDevice::getScan();
     pClient = BLEDevice::createClient();
-    pClient->setClientCallbacks(new MyClientCallbacks());
+    // pClient->setClientCallbacks(new MyClientCallbacks());
 
     blescan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
     blescan->setActiveScan(true);
@@ -959,11 +964,12 @@ void screen_task(void * param) {
     This task handles BLE scanning and possible GATT request to an Alpicool fridge
 */
 void ble_task(void *parameter) {
-  BLEScanResults foundDevices;
-  int task_counter = 0;
+  //BLEScanResults foundDevices;
+  task_counter = 0;
 
   while (1) {
       ble_timer = millis();
+      alpicool_heard = false;
 
       Serial.printf("============= start scan at %d seconds\n", int(millis()/1000));
       foundDevices = blescan->start(11, false);
@@ -975,27 +981,32 @@ void ble_task(void *parameter) {
       Serial.printf("============= end scan\n");
   
       if (alpicool_index != 0xFF) {
-          if (!pClient->isConnected()) {
-              Serial.println("Connecting to Alpicool fridge");
-              pClient->connect(BLEAddress(tagmac[alpicool_index]));
-              pClient->setMTU(32);
-              pRemoteService = pClient->getService("00001234-0000-1000-8000-00805F9B34FB");
-              rCharacteristic = pRemoteService->getCharacteristic("00001236-0000-1000-8000-00805F9B34FB");
-              rCharacteristic->registerForNotify(alpicoolCallback);
-              wCharacteristic = pRemoteService->getCharacteristic("00001235-0000-1000-8000-00805F9B34FB");
+          if (alpicool_heard) {
+              if (!pClient->isConnected()) {
+                  Serial.println("Connecting to Alpicool fridge");
+                  pClient->connect(BLEAddress(tagmac[alpicool_index]));
+                  pClient->setMTU(32);
+                  pRemoteService = pClient->getService("00001234-0000-1000-8000-00805F9B34FB");
+                  rCharacteristic = pRemoteService->getCharacteristic("00001236-0000-1000-8000-00805F9B34FB");
+                  rCharacteristic->registerForNotify(alpicoolCallback);
+                  wCharacteristic = pRemoteService->getCharacteristic("00001235-0000-1000-8000-00805F9B34FB");
+              } else {
+                  Serial.println("Was already connected. Disconnect.");
+                  pClient->disconnect();
+                  wCharacteristic = nullptr;
+              }
           } else {
-              Serial.println("Was already connected. Disconnect.");
-              pClient->disconnect();
-              wCharacteristic = nullptr;
+            tagtime[alpicool_index] = 0;
           }
           // Send query request
           // See: https://github.com/klightspeed/BrassMonkeyFridgeMonitor
-          if (wCharacteristic != nullptr) {
+          if (wCharacteristic != nullptr && alpicool_heard) {
               Serial.println("Sending query to Alpicool fridge: fefe03010200");
               wCharacteristic->writeValue({0xfe, 0xfe, 3, 1, 2, 0}, 6);
           }
       }
       Serial.printf("Clientnum %d, task iteration: %d, HEAP: %d\n", clientnum, task_counter++, ESP.getFreeHeap());
+
       vTaskDelay(4000 / portTICK_PERIOD_MS);
       pClient->disconnect(); // make sure
       yield();
