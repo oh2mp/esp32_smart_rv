@@ -5,7 +5,6 @@
 
 */
 
-// #include <FreeRTOS.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include "FS.h"
@@ -57,7 +56,6 @@ uint8_t tagcount = 0;            // total amount of known tags
 int screentag = 0;
 int screenslot = 0;
 char gattcache[32];              // Space for caching GATT payload
-int clientnum = 0;
 int task_counter = 0;
 
 TaskHandle_t screentask = NULL;
@@ -165,17 +163,6 @@ uint8_t tagTypeFromPayload(const uint8_t *payload, const uint8_t *mac) {
 
     return 0xFF; // unknown
 }
-// Define the MyClientCallbacks class
-/*class MyClientCallbacks : public BLEClientCallbacks {
-public:
-  void onConnect(BLEClient* pClient) {
-    Serial.println("Connected to fridge");
-  }
-
-  void onDisconnect(BLEClient* pClient) {
-    Serial.println("Disconnected from fridge");
-  }
-};*/
 
 /* ------------------------------------------------------------------------------- */
 /*  Known devices callback
@@ -191,6 +178,11 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 
             memset(payload, 0, 32);
             memcpy(payload, advDev.getPayload(), 32);
+
+             // ignore if payload doesn't contain valid data.
+            if (memcmp(payload+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 25) == 0) {
+                return;
+            }
             
             // Don't we know the type of this device yet?
             if (tagtype[taginx] == 0 || tagtype[taginx] == 0xFF) {
@@ -204,11 +196,6 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
                         tagtype[taginx] = TAG_IBSTH2;
                     }
                 }
-            }
-            // ignore if payload doesn't contain valid data.
-            if (tagtype[taginx] == TAG_IBSTH2 &&
-                memcmp(payload+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 25) == 0) {
-                return;
             }
 
             tagtime[taginx] = millis();
@@ -458,7 +445,6 @@ void setup() {
     BLEDevice::init("");
     blescan = BLEDevice::getScan();
     pClient = BLEDevice::createClient();
-    // pClient->setClientCallbacks(new MyClientCallbacks());
 
     blescan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
     blescan->setActiveScan(true);
@@ -469,11 +455,6 @@ void setup() {
     xTaskCreate(screen_task, "screen", 4096, NULL, 2, &screentask);
     xTaskCreate(button_task, "button", 4096, NULL, 1, &buttontask);
     xTaskCreate(ble_task, "bletask", 4096, NULL, 1, &bletask);
-
-    // Reset real time clock
-    //timeval epoch = {0, 0};
-    //const timeval *tv = &epoch;
-    //settimeofday(tv, NULL);
 }
 
 /* ------------------------------------------------------------------------------- */
@@ -503,14 +484,8 @@ void loop() {
         // Sometimes connecting to GATT server hangs. The library has timeout about 50 days,
         // but we don't want to wait that long. 30 seconds is enough.
         if (millis() - ble_timer > 30000) {
-            Serial.println("Restart BLE task");
-            vTaskDelete(bletask);
-            pClient->disconnect();
-            clientnum++;
-            pClient = BLEDevice::createClient();
-            delay(10000);
-            ble_timer = millis();
-            xTaskCreate(ble_task, "bletask", 4096, NULL, 1, &bletask);
+            Serial.println("BLE looks to be hanged. Reboot.");
+            ESP.restart();
         }
     } else {
         // Else the portal mode is active
@@ -869,13 +844,12 @@ void screen_task(void * param) {
                     tft.fillRect(int(TFTW / 2 -7), basey + 84, 3, 6, TFT_WHITE);
 
                     // Inkbird logo
-                    static uint8_t inkbird_bits[] = {
-                         0x80, 0x00, 0x00, 0xc0, 0x03, 0x00, 0xe0, 0x03, 0x00, 0xf0, 0xc7, 0x00, 0xf8, 0xe3, 0x01, 0xfc,
-                         0xf1, 0x03, 0xfe, 0xf8, 0x03, 0x7f, 0xfc, 0x03, 0x3f, 0xfe, 0x03, 0x1f, 0xff, 0x03, 0x1f, 0xff,
-                         0x03, 0x1f, 0xfe, 0x03, 0xff, 0xe1, 0x03, 0xff, 0xe3, 0x03, 0xff, 0xe1, 0x03, 0xff, 0xf1, 0x03,
-                         0xff, 0xf8, 0x03, 0x3f, 0xfc, 0x00, 0x3f, 0xfe, 0x00, 0x0f, 0x3f, 0x00,  0x8c, 0x3f, 0x00, 0x80,
-                         0x0f, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x02, 0x00 };
-                    tft.drawXBitmap(TFTW - 22, basey + 40, inkbird_bits, 18, 24, TFT_LOGOCOLOR);
+                    tft.drawWideLine(TFTW - 21, basey + 49, TFTW - 15, basey + 43, 4, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
+                    tft.drawWideLine(TFTW - 21, basey + 49, TFTW - 21, basey + 54, 4, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
+                    tft.drawWideLine(TFTW - 21, basey + 57, TFTW - 17, basey + 54, 4, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
+                    tft.drawWideLine(TFTW - 14, basey + 61, TFTW - 8, basey + 55, 4, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
+                    tft.drawWideLine(TFTW - 8, basey + 55, TFTW - 8, basey + 46, 4, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
+                    tft.drawWideLine(TFTW - 8, basey + 46, TFTW - 12, basey + 50, 4, TFT_LOGOCOLOR, TFT_LOGOCOLOR);
                 }
             }
             // Alpicool fridge
@@ -1003,12 +977,13 @@ void ble_task(void *parameter) {
           if (wCharacteristic != nullptr && alpicool_heard) {
               Serial.println("Sending query to Alpicool fridge: fefe03010200");
               wCharacteristic->writeValue({0xfe, 0xfe, 3, 1, 2, 0}, 6);
+              vTaskDelay(1000 / portTICK_PERIOD_MS); // give one second
+              pClient->disconnect();
           }
       }
-      Serial.printf("Clientnum %d, task iteration: %d, HEAP: %d\n", clientnum, task_counter++, ESP.getFreeHeap());
+      Serial.printf("BLE task iteration: %d, Free heap: %d\n", task_counter++, ESP.getFreeHeap());
 
-      vTaskDelay(4000 / portTICK_PERIOD_MS);
-      pClient->disconnect(); // make sure
+      vTaskDelay(3000 / portTICK_PERIOD_MS);
       yield();
   }  
 }
