@@ -180,7 +180,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
             memcpy(payload, advDev.getPayload(), 32);
 
              // ignore if payload doesn't contain valid data.
-            if (memcmp(payload+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 25) == 0) {
+            if (memcmp(payload+7, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 24) == 0) {
                 return;
             }
             
@@ -199,13 +199,14 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
             }
 
             tagtime[taginx] = millis();
-            // Copy the payload to tagdata
-            memset(tagdata[taginx], 0, sizeof(tagdata[taginx]));
-            memcpy(tagdata[taginx], payload, 32);
             if (tagtype[taginx] == TAG_ALPICOOL) {
+                memset(tagdata[taginx], 0, 32);
                 memcpy(tagdata[taginx], gattcache, 32);
                 alpicool_index = taginx;
                 alpicool_heard = true;
+            } else {
+                memset(tagdata[taginx], 0, 32);
+                memcpy(tagdata[taginx], payload, 32);
             }
 
             Serial.printf("BLE callback: payload=");
@@ -226,7 +227,7 @@ void alpicoolCallback(
   bool isNotify) {
 
     memset(gattcache,0,sizeof(gattcache));
-    memcpy(gattcache,pData,length);
+    memcpy(gattcache,pData,32);
 
     short temperature = 0;
     short wanted = 0;
@@ -969,8 +970,6 @@ void ble_task(void *parameter) {
                   pClient->disconnect();
                   wCharacteristic = nullptr;
               }
-          } else {
-            tagtime[alpicool_index] = 0;
           }
           // Send query request
           // See: https://github.com/klightspeed/BrassMonkeyFridgeMonitor
