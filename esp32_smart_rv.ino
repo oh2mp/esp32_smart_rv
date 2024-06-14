@@ -9,7 +9,6 @@
 #include <WebServer.h>
 #include "FS.h"
 #include <LITTLEFS.h>
-//#include <time.h>
 #include "TFT_eSPI.h"
 TFT_eSPI tft = TFT_eSPI();
 #define TFTW 240 // tft width
@@ -483,8 +482,8 @@ void loop() {
             }
         }
         // Sometimes connecting to GATT server hangs. The library has timeout about 50 days,
-        // but we don't want to wait that long. 30 seconds is enough.
-        if (millis() - ble_timer > 30000) {
+        // but we don't want to wait that long. A minute is enough.
+        if (millis() - ble_timer > 60000) {
             Serial.println("BLE looks to be hanged. Reboot.");
             ESP.restart();
         }
@@ -939,7 +938,6 @@ void screen_task(void * param) {
     This task handles BLE scanning and possible GATT request to an Alpicool fridge
 */
 void ble_task(void *parameter) {
-  //BLEScanResults foundDevices;
   task_counter = 0;
 
   while (1) {
